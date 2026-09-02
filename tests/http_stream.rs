@@ -1,4 +1,4 @@
-use revopoint_pop3_wifi::http_stream::{get_chunked, StreamLimits};
+use revopoint_pop3_wifi::http_stream::{get_chunked, get_chunked_prefix, StreamLimits};
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::thread;
@@ -187,4 +187,29 @@ fn accepts_body_exactly_at_limit_and_rejects_one_byte_over() {
         assert_eq!(result.is_ok(), should_pass);
         server.join().expect("fixture server");
     }
+}
+
+#[test]
+fn captures_an_exact_prefix_and_disconnects_without_waiting_for_stream_end() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let Some(mut stream) = accept_fixture(&listener) else {
+            return;
+        };
+        read_request(&mut stream);
+        let _ = stream.write_all(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nABCD\r\n4\r\nEFGH\r\n",
+        );
+    });
+
+    let mut body = Vec::new();
+    let received = get_chunked_prefix(address, "/stream", limits(), 5, |chunk| {
+        body.extend_from_slice(chunk)
+    })
+    .expect("capture bounded prefix");
+
+    assert_eq!(received, 5);
+    assert_eq!(body, b"ABCDE");
+    server.join().expect("fixture server");
 }

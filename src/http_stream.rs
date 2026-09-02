@@ -38,6 +38,31 @@ pub fn get_chunked(
     address: SocketAddr,
     path: &str,
     limits: StreamLimits,
+    receive: impl FnMut(&[u8]),
+) -> Result<usize, StreamError> {
+    get_chunked_inner(address, path, limits, None, receive)
+}
+
+pub fn get_chunked_prefix(
+    address: SocketAddr,
+    path: &str,
+    limits: StreamLimits,
+    prefix_bytes: usize,
+    receive: impl FnMut(&[u8]),
+) -> Result<usize, StreamError> {
+    if prefix_bytes == 0 || prefix_bytes > limits.max_body_bytes {
+        return Err(fail(
+            "stream prefix must be non-zero and no larger than the body limit",
+        ));
+    }
+    get_chunked_inner(address, path, limits, Some(prefix_bytes), receive)
+}
+
+fn get_chunked_inner(
+    address: SocketAddr,
+    path: &str,
+    limits: StreamLimits,
+    prefix_bytes: Option<usize>,
     mut receive: impl FnMut(&[u8]),
 ) -> Result<usize, StreamError> {
     if !path.starts_with('/') || path.contains(['\r', '\n']) {
@@ -87,8 +112,14 @@ pub fn get_chunked(
             return Err(fail("HTTP response exceeds configured body limit"));
         }
 
-        buffered.read_exact_chunks(size, &mut receive)?;
-        received += size;
+        let accepted = prefix_bytes
+            .map(|limit| size.min(limit - received))
+            .unwrap_or(size);
+        buffered.read_exact_chunks(accepted, &mut receive)?;
+        received += accepted;
+        if accepted < size || prefix_bytes == Some(received) {
+            return Ok(received);
+        }
         if buffered.read_exact_vec(2)? != b"\r\n" {
             return Err(fail("HTTP chunk payload is missing its CRLF terminator"));
         }

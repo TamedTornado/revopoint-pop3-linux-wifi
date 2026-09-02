@@ -150,6 +150,25 @@ Image/CameraInfo pair. A local Jazzy qualification run delivered 80 live frames
 to stock subscribers; stock `depth_image_proc::PointCloudXyzNode` produced a
 non-empty organized 640x400 `PointCloud2`.
 
+To reproduce the stock visualization path, leave the publisher running and use
+two more sourced terminals:
+
+```sh
+# Terminal 2: derive an organized point cloud with the stock ROS component
+. /opt/ros/jazzy/setup.sh
+ros2 run depth_image_proc point_cloud_xyz_node --ros-args \
+  -r image_rect:=/depth/image_rect \
+  -r camera_info:=/depth/camera_info
+
+# Terminal 3: open the supplied depth-image and point-cloud view
+. /opt/ros/jazzy/setup.sh
+rviz2 -d config/pop3-depth.rviz
+```
+
+The RViz profile fixes the view to `pop3_depth_optical_frame`, subscribes to
+`/depth/image_rect` and `/points` with best-effort QoS, and includes a metric
+grid. Visual and physical-target acceptance remains a manual qualification.
+
 The independently established envelope is documented in
 [`docs/depth-wire-observations.md`](docs/depth-wire-observations.md).
 

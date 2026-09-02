@@ -121,6 +121,12 @@ CameraInfo topics and emitted a non-empty organized 640x400 `PointCloud2`.
 RViz2 visual acceptance, turntable motion, planar-target measurement, and
 restart qualification remain open.
 
+First visual receipt: RViz2 loaded the repository profile and rendered the live
+organized cloud against its metric grid. The initial screenshot is an oblique,
+nearly edge-on view through the scanner frustum, so it proves non-empty spatial
+geometry rather than recognizable-object shape or metric accuracy. Those
+stronger claims still require a known target and deliberate viewing angles.
+
 ### 8. Continue into turntable RGB-D capture ([#8](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/8))
 
 After the depth milestone, add RGB synchronization, cross-camera calibration,

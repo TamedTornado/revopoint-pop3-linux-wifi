@@ -97,9 +97,9 @@
       "id": "rviz-hardware",
       "tier": "manual-hardware",
       "environment": "POP 3 Plus, turntable, ROS 2 Jazzy, RViz2",
-      "command": "not implemented",
-      "status": "NOT_IMPLEMENTED",
-      "claim": "Live depth and derived geometry are visually and metrically accepted"
+      "command": "rviz2 -d config/pop3-depth.rviz",
+      "status": "PARTIAL",
+      "claim": "RViz2 rendered the real live organized cloud against a metric grid; recognizable-object shape, turntable motion, orientation, and measured scale/planarity remain unqualified"
     }
   ]
 }

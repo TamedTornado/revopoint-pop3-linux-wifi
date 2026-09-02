@@ -63,6 +63,11 @@ Identify only the wire fields required to delimit and validate frames. Test
 every header split, concatenated frames, corruption, truncation, and size
 limits before trusting hardware frame counts.
 
+In progress: the independently observed and binary-corroborated outer envelope
+is implemented and mutation-clean. A 1 MiB hardware run recovered four complete
+compressed frames. Inner dimensions and continuity fields are not yet
+established, so this phase and issue remain open.
+
 ### 4. Decode the depth plane ([#4](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/4))
 
 Decode compressed payloads in clean-room Rust using project-owned fixtures.

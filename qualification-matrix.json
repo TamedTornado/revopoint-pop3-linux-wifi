@@ -7,7 +7,7 @@
     "native_dependency_quarantine_pass": true,
     "mutation_tests_pass": false,
     "hardware_depth_bytes_pass": true,
-    "hardware_depth_frames_pass": false,
+    "hardware_depth_frames_pass": true,
     "ros_depth_camera_pass": false,
     "rviz_live_acceptance_pass": false
   },
@@ -50,7 +50,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_stream.rs -j 1 --timeout 5",
       "status": "PARTIAL",
-      "claim": "All eight viable depth-orchestration mutants are caught; surviving HTTP mutants and future parser, decoder, and calibration scopes remain open"
+      "claim": "All eight viable depth-orchestration mutants and all 28 viable frame-envelope mutants are caught; surviving HTTP mutants and future decoder and calibration scopes remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -64,9 +64,9 @@
       "id": "hardware-frames",
       "tier": "hardware",
       "environment": "POP 3 Plus on reachable LAN",
-      "command": "not implemented",
-      "status": "NOT_IMPLEMENTED",
-      "claim": "The Rust client receives bounded complete depth frames from real hardware"
+      "command": "cargo run --release -- --smoke-depth SCANNER_IP",
+      "status": "PASS",
+      "claim": "The Rust client recovered four complete bounded envelopes and compressed sizes from a 1 MiB real-hardware capture; dimensions and inner metadata remain unclaimed"
     },
     {
       "id": "metric-depth",

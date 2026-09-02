@@ -100,14 +100,15 @@ its IPv4 address:
 cargo run --release -- --smoke-depth 192.168.8.245
 ```
 
-The command captures exactly 1 MiB into a bounded reader, retains only the first
-16 bytes for display, closes the scanner stream, and exits. It is intended as a
-hardware diagnostic rather than a file format or visualization tool.
+The command captures exactly 1 MiB into a bounded reader, reports complete frame
+envelopes and their compressed sizes, retains only the first 16 bytes for
+display, closes the scanner stream, and exits. It is intended as a hardware
+diagnostic rather than a file format or visualization tool.
 
 Example output:
 
 ```text
-Depth stream smoke passed: bytes=1048576, prefix=0d 0a 0d 0a 44 33 22 11 ...
+Depth stream smoke passed: bytes=1048576, complete_frames=4, compressed_sizes=[...], prefix=0d 0a 0d 0a 44 33 22 11 ...
 ```
 
 Offline network-boundary tests use loopback fixture servers and require no
@@ -116,6 +117,9 @@ scanner:
 ```sh
 cargo test --test http_stream --test depth_capture
 ```
+
+The independently established envelope is documented in
+[`docs/depth-wire-observations.md`](docs/depth-wire-observations.md).
 
 ## Important limitations
 

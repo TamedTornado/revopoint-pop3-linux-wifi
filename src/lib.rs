@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 pub mod depth_stream;
+pub mod frame_envelope;
 pub mod http_stream;
 
 const VID: u16 = 0x2207;
@@ -355,16 +356,33 @@ fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
         max_body_bytes: 2 * 1024 * 1024,
     };
     let mut prefix = Vec::with_capacity(16);
+    let mut parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
+    let mut frame_sizes = Vec::new();
+    let mut frame_error = None;
     let received = depth_stream::capture_depth_prefix(address, limits, PREFIX_BYTES, |chunk| {
         let remaining = 16_usize.saturating_sub(prefix.len());
         prefix.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        if frame_error.is_none() {
+            match parser.push(chunk) {
+                Ok(frames) => {
+                    frame_sizes.extend(frames.into_iter().map(|frame| frame.declared_payload_len))
+                }
+                Err(error) => frame_error = Some(error),
+            }
+        }
     })?;
+    if let Some(error) = frame_error {
+        return Err(Box::new(error));
+    }
     let prefix = prefix
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<Vec<_>>()
         .join(" ");
-    println!("Depth stream smoke passed: bytes={received}, prefix={prefix}");
+    println!(
+        "Depth stream smoke passed: bytes={received}, complete_frames={}, compressed_sizes={frame_sizes:?}, prefix={prefix}",
+        frame_sizes.len()
+    );
     Ok(())
 }
 

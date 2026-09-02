@@ -34,7 +34,7 @@ jobs:
         run: |
           jq -e '
             .schema_version == 1 and
-            (.statuses == ["PASS", "FAIL", "BLOCKED", "NOT_IMPLEMENTED"]) and
+            (.statuses == ["PASS", "FAIL", "PARTIAL", "BLOCKED", "NOT_IMPLEMENTED"]) and
             ([.cells[].id] | length == (unique | length)) and
             (.statuses as $statuses |
               all(.cells[]; .status as $status | $statuses | index($status) != null))

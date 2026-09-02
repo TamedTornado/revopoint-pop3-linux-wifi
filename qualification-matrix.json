@@ -4,6 +4,7 @@
   "claims": {
     "deterministic_tests_pass": true,
     "offline_integration_pass": true,
+    "mutation_tests_pass": false,
     "hardware_depth_frames_pass": false,
     "ros_depth_camera_pass": false,
     "rviz_live_acceptance_pass": false
@@ -32,6 +33,14 @@
       "command": "cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings",
       "status": "PASS",
       "claim": "Tracked Rust sources are formatted and warning-free"
+    },
+    {
+      "id": "mutation",
+      "tier": "mutation",
+      "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
+      "command": "not implemented",
+      "status": "NOT_IMPLEMENTED",
+      "claim": "Viable mutants in deterministic protocol, decoder, and calibration logic are caught"
     },
     {
       "id": "hardware-stream",

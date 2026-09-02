@@ -60,6 +60,13 @@ convention, and rectification state. Validate scale and planar error against
 measured physical targets. The output of this phase is a calibrated depth
 frame, not merely decoded integers.
 
+### 5a. Mutation-test deterministic contracts ([#9](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/9))
+
+Run a pinned Rust mutation tool over HTTP framing, frame parsing,
+decompression bounds, calibration conversion, and projection. Every viable
+survivor becomes a red test before it is fixed. Keep mutation claims separate
+from network, hardware, ROS, and visual qualification.
+
 ### 6. Publish ROS 2 camera messages ([#6](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/6))
 
 Add a feature-gated Rust ROS 2 Jazzy adapter publishing synchronized
@@ -97,6 +104,7 @@ For each behavior:
 |---|---|---|---|
 | Unit | Pure parser, decoder, calibration, and mapping logic | `cargo test --lib` | Required |
 | Offline integration | Built CLI and local HTTP fixture server | `cargo test --test '*'` | Required |
+| Mutation | Deterministic protocol, decoder, and calibration contracts | milestone command | Bounded subset later |
 | ROS integration | ROS publishers/subscribers and `depth_image_proc` | milestone command | Later CI job |
 | Hardware | Real POP 3 on the LAN | opt-in ignored test/tool | Local only |
 | Visual acceptance | Real hardware and RViz2 | documented session | Manual only |
@@ -111,4 +119,3 @@ The authoritative current claim status is in `qualification-matrix.json`.
 - Disconnect, error, shutdown, and restart are bounded and observable.
 - Unit, offline integration, ROS integration, hardware, and visual evidence are
   reported separately and agree with the qualification matrix.
-

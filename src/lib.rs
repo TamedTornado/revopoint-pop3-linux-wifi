@@ -5,6 +5,8 @@ use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
+pub mod http_stream;
+
 const VID: u16 = 0x2207;
 const PID: u16 = 0x110c;
 const INTERFACE: u8 = 0;

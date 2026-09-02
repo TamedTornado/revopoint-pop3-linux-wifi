@@ -37,14 +37,16 @@ envelopes, decompress their QuickLZ payloads in Rust, and validate owned
 The client also downloads and validates the scanner's depth projection matrix,
 then scales its focal lengths and principal point to the selected stream size
 using the same resolution transform documented by Revopoint's public SDK.
-A live standard-application publisher is not yet implemented.
+A feature-gated live ROS 2 publisher is available for the first standard
+application path.
 
 The in-progress optional ROS 2 adapter maps each Z16 plane to standard
 `sensor_msgs/Image` `32FC1` meters so the scanner's 0.1 mm units are not
 silently mislabeled as the `16UC1` millimeter convention. It produces matching
 rectified `sensor_msgs/CameraInfo` metadata and uses sensor-data QoS. The exact
 runtime message layouts are tested through Jazzy's installed type-support
-libraries; the live publisher CLI is the next slice.
+libraries. The live CLI publishes 20 bounded acquisition batches so a normal
+exit is deterministic and always closes each scanner stream.
 
 ## Build
 
@@ -134,6 +136,19 @@ The optional ROS adapter requires ROS 2 Jazzy to be sourced:
 . /opt/ros/jazzy/setup.sh
 cargo test --features ros2 --test ros2_dynamic_messages
 ```
+
+Publish live scanner frames on `depth/image_rect` and `depth/camera_info`:
+
+```sh
+. /opt/ros/jazzy/setup.sh
+cargo run --release --features ros2 -- --ros2-depth 192.168.8.245
+```
+
+The publisher converts the scanner's 0.1 mm Z16 units to `32FC1` meters and
+assigns identical provisional host-publication timestamps and optical frame IDs to each
+Image/CameraInfo pair. A local Jazzy qualification run delivered 80 live frames
+to stock subscribers; stock `depth_image_proc::PointCloudXyzNode` produced a
+non-empty organized 640x400 `PointCloud2`.
 
 The independently established envelope is documented in
 [`docs/depth-wire-observations.md`](docs/depth-wire-observations.md).

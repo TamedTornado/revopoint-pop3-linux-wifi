@@ -13,4 +13,5 @@ fn help_is_available_without_scanner_hardware() {
     assert!(stdout.contains("--write"));
     assert!(stdout.contains("--diagnose"));
     assert!(stdout.contains("--smoke-depth"));
+    assert!(stdout.contains("--ros2-depth"));
 }

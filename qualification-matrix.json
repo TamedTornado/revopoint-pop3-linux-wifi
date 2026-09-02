@@ -9,7 +9,7 @@
     "hardware_depth_bytes_pass": true,
     "hardware_depth_frames_pass": true,
     "hardware_depth_z16_pass": true,
-    "ros_depth_camera_pass": false,
+    "ros_depth_camera_pass": true,
     "rviz_live_acceptance_pass": false
   },
   "cells": [
@@ -81,17 +81,17 @@
       "id": "ros-contract",
       "tier": "ros-integration",
       "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
-      "command": ". /opt/ros/jazzy/setup.sh && cargo test --features ros2 --test ros2_dynamic_messages",
-      "status": "PARTIAL",
-      "claim": "Jazzy's installed runtime type support accepts exact sensor_msgs/Image 32FC1-meter and rectified CameraInfo fields with matching headers; a live subscriber has not yet received scanner frames"
+      "command": ". /opt/ros/jazzy/setup.sh && cargo run --release --features ros2 -- --ros2-depth SCANNER_IP",
+      "status": "PASS",
+      "claim": "Stock Jazzy subscribers received live 640x400 sensor_msgs/Image 32FC1-meter and rectified CameraInfo topics with sensor-data QoS and per-pair matching headers"
     },
     {
       "id": "depth-image-proc",
       "tier": "ros-integration",
       "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
-      "command": "not implemented",
-      "status": "NOT_IMPLEMENTED",
-      "claim": "Stock depth_image_proc emits a non-empty organized PointCloud2"
+      "command": "ros2 run depth_image_proc point_cloud_xyz_node --ros-args -r image_rect:=/depth/image_rect -r camera_info:=/depth/camera_info",
+      "status": "PASS",
+      "claim": "Stock depth_image_proc synchronized the live driver topics and emitted a non-empty organized 640x400 PointCloud2"
     },
     {
       "id": "rviz-hardware",

@@ -105,7 +105,9 @@ standard `32FC1` meters and constructs synchronized rectified camera metadata.
 The mapping is mutation-clean. A feature-gated rclrs 0.7 adapter now creates
 real runtime-typed Jazzy `sensor_msgs/Image` and `CameraInfo` messages under
 sensor-data QoS; the installed type-support integration tests pass. Live
-publishing and subscriber evidence remain open.
+publishing now captures 20 bounded batches and a stock Jazzy subscriber received
+the resulting runtime-typed topics. Device sequence/timestamp recovery remains
+open; the provisional publisher uses a shared host timestamp per message pair.
 
 ### 7. Qualify the stock Linux application path ([#7](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/7))
 
@@ -113,6 +115,11 @@ Feed the topics to `depth_image_proc::PointCloudXyzNode`, display the live
 image and derived cloud in RViz2, and record automated graph evidence plus a
 real-hardware acceptance receipt. Exercise turntable motion, scale,
 orientation, shutdown, and restart.
+
+In progress: stock Jazzy `PointCloudXyzNode` synchronized the live Image and
+CameraInfo topics and emitted a non-empty organized 640x400 `PointCloud2`.
+RViz2 visual acceptance, turntable motion, planar-target measurement, and
+restart qualification remain open.
 
 ### 8. Continue into turntable RGB-D capture ([#8](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/8))
 

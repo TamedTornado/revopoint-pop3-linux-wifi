@@ -5,7 +5,6 @@ use rclrs::{
 };
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Ros2AdapterError(String);
@@ -165,7 +164,7 @@ pub struct Ros2CameraPublisher {
 }
 
 impl Ros2CameraPublisher {
-    pub fn new(node: &Arc<rclrs::Node>) -> Result<Self, Ros2AdapterError> {
+    pub fn new(node: &rclrs::Node) -> Result<Self, Ros2AdapterError> {
         let mut image_options = PublisherOptions::new("depth/image_rect");
         image_options.qos = QOS_PROFILE_SENSOR_DATA;
         let image = node

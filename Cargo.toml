@@ -1,0 +1,11 @@
+[package]
+name = "revopoint-pop3-wifi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Provision Revopoint POP 3 Wi-Fi credentials over USB on Linux"
+repository = "https://github.com/TamedTornado/revopoint-pop3-linux-wifi"
+
+[dependencies]
+rpassword = "7.3.1"
+rusb = "0.9.4"

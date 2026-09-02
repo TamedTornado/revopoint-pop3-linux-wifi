@@ -1,0 +1,2 @@
+# Revopoint POP 3 / POP 3 Plus USB access for members of plugdev
+SUBSYSTEM=="usb", ATTR{idVendor}=="2207", ATTR{idProduct}=="110c", MODE="0660", GROUP="plugdev", TAG+="uaccess"

@@ -1,0 +1,112 @@
+# Revopoint POP 3 Linux Wi-Fi provisioning
+
+A small Linux-native utility for reading and setting a Revopoint POP 3 scanner's
+Wi-Fi client credentials over USB. It avoids installing or running Revo Scan,
+Windows, Wine, or a virtual machine.
+
+This project is an independent interoperability implementation. It contains no
+Revopoint source code, SDK headers, binaries, firmware, application assets, or
+credentials.
+
+## Current status
+
+Tested on:
+
+- Revopoint POP 3 Plus, USB ID `2207:110c`
+- scanner firmware `v3.2.36.20241219`
+- Ubuntu 24.04, x86-64
+
+The read path has been tested against real hardware. The write path:
+
+1. prompts for the SSID and password locally;
+2. hides password input and never puts it in process arguments;
+3. validates WPA2 credential lengths;
+4. writes the scanner's client configuration;
+5. reads it back and requires a byte-for-byte match; and
+6. asks the scanner to sync the filesystem.
+
+It does **not** change firmware or send an upgrade command.
+
+## Build
+
+Install Rust and the normal Linux USB development package:
+
+```sh
+sudo apt install pkg-config libusb-1.0-0-dev
+cargo build --release
+```
+
+## USB permissions
+
+For a one-off test, run the utility with `sudo`. For regular use, install the
+included udev rule instead:
+
+```sh
+sudo install -m 0644 udev/60-revopoint-pop3.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+Then unplug and reconnect the scanner. The rule grants access to members of the
+`plugdev` group. Log out and back in after adding yourself to that group.
+
+## Read the current configuration
+
+The read command reports only the SSID and whether a password is configured. It
+does not print the password.
+
+```sh
+cargo run --release
+```
+
+Example:
+
+```text
+Current client SSID: "POP3Plus"
+Current password configured: yes
+```
+
+## Provision Wi-Fi
+
+Stop any application currently using the scanner, then run:
+
+```sh
+cargo run --release -- --write
+```
+
+The utility asks for the SSID, requests the password with terminal echo disabled,
+and requires typing `WRITE` before touching the scanner.
+
+After a successful write, disconnect the USB data cable and power-cycle the
+scanner from a power adapter or power bank. When powered through a computer's USB
+data connection, the scanner normally remains in USB mode.
+
+## Important limitations
+
+- Only WPA2-PSK networks are currently generated.
+- SSIDs are limited to 32 bytes and passwords to 8–63 bytes.
+- WPA Enterprise, captive portals, and WPA3-only networks are not supported.
+- The scanner briefly loses its kernel UVC driver while the command runs; the
+  utility reattaches it before exiting.
+- Only `2207:110c` is accepted. Other Revopoint products may use a related
+  protocol, but they are deliberately not targeted without hardware testing.
+
+## How it works
+
+The scanner exposes a vendor UVC extension unit on its USB control interface.
+The utility uses libusb control transfers to access the scanner's ordinary
+`wpa_supplicant` client configuration. File reads and writes are transferred in
+56-byte payload blocks. No kernel module or custom driver is required.
+
+The implementation is intentionally narrow: one known device, one configuration
+file, and one filesystem-sync command.
+
+## Recovery
+
+Before writing, the utility displays the existing SSID. After writing, it verifies
+the new file before syncing. If verification fails, do not power-cycle the
+scanner; rerun the utility or restore the previous network details.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

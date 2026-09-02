@@ -67,4 +67,41 @@ jobs:
         run: cargo test --locked --test '*'
 
       - name: Clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --no-default-features -- -D warnings
+
+  ros2-adapter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921
+        with:
+          toolchain: nightly-2026-08-17
+          components: clippy
+
+      - name: Configure official ROS 2 repository
+        run: |
+          version=$(curl -fsSL https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest |
+            sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p')
+          test -n "$version"
+          curl -fL -o /tmp/ros2-apt-source.deb \
+            "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${version}/ros2-apt-source_${version}.noble_all.deb"
+          sudo dpkg -i /tmp/ros2-apt-source.deb
+          sudo apt-get update
+
+      - name: Install ROS 2 adapter dependencies
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libclang-dev libusb-1.0-0-dev pkg-config \
+            ros-jazzy-ros-base ros-jazzy-example-interfaces ros-jazzy-test-msgs
+
+      - name: Test and lint ROS 2 adapter
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          cargo test --locked --features ros2 --test ros2_dynamic_messages
+          cargo clippy --locked --all-targets --features ros2 -- -D warnings

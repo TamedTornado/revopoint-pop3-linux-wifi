@@ -37,7 +37,14 @@ envelopes, decompress their QuickLZ payloads in Rust, and validate owned
 The client also downloads and validates the scanner's depth projection matrix,
 then scales its focal lengths and principal point to the selected stream size
 using the same resolution transform documented by Revopoint's public SDK.
-Standard application output is not yet implemented.
+A live standard-application publisher is not yet implemented.
+
+The in-progress optional ROS 2 adapter maps each Z16 plane to standard
+`sensor_msgs/Image` `32FC1` meters so the scanner's 0.1 mm units are not
+silently mislabeled as the `16UC1` millimeter convention. It produces matching
+rectified `sensor_msgs/CameraInfo` metadata and uses sensor-data QoS. The exact
+runtime message layouts are tested through Jazzy's installed type-support
+libraries; the live publisher CLI is the next slice.
 
 ## Build
 
@@ -119,6 +126,13 @@ scanner:
 
 ```sh
 cargo test --test http_stream --test depth_capture
+```
+
+The optional ROS adapter requires ROS 2 Jazzy to be sourced:
+
+```sh
+. /opt/ros/jazzy/setup.sh
+cargo test --features ros2 --test ros2_dynamic_messages
 ```
 
 The independently established envelope is documented in

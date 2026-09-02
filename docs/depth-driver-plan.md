@@ -100,6 +100,13 @@ Add a feature-gated Rust ROS 2 Jazzy adapter publishing synchronized
 `sensor_msgs/Image` and `sensor_msgs/CameraInfo` messages with sensor-data QoS.
 Test exact message fields using a real ROS subscriber boundary.
 
+In progress: a ROS-independent mapping contract converts device-scaled Z16 to
+standard `32FC1` meters and constructs synchronized rectified camera metadata.
+The mapping is mutation-clean. A feature-gated rclrs 0.7 adapter now creates
+real runtime-typed Jazzy `sensor_msgs/Image` and `CameraInfo` messages under
+sensor-data QoS; the installed type-support integration tests pass. Live
+publishing and subscriber evidence remain open.
+
 ### 7. Qualify the stock Linux application path ([#7](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/7))
 
 Feed the topics to `depth_image_proc::PointCloudXyzNode`, display the live

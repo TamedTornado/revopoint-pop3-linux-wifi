@@ -11,6 +11,9 @@ pub mod depth_decode;
 pub mod depth_stream;
 pub mod frame_envelope;
 pub mod http_stream;
+#[cfg(feature = "ros2")]
+pub mod ros2_adapter;
+pub mod ros_camera;
 
 const VID: u16 = 0x2207;
 const PID: u16 = 0x110c;

@@ -51,7 +51,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "All 40 viable depth-stream/profile/scale, all 28 viable frame-envelope, all 38 viable depth-decoder/Z16, and all 53 viable calibration mutants are caught; surviving HTTP mutants remain open"
+      "claim": "All 40 viable depth-stream/profile/scale, all 28 viable frame-envelope, all 38 viable depth-decoder/Z16, all 53 viable calibration, and all 41 viable ROS mapping mutants are caught; surviving HTTP and ROS runtime-adapter mutants remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -81,9 +81,9 @@
       "id": "ros-contract",
       "tier": "ros-integration",
       "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
-      "command": "not implemented",
-      "status": "NOT_IMPLEMENTED",
-      "claim": "Stock subscribers receive valid Image and CameraInfo topics"
+      "command": ". /opt/ros/jazzy/setup.sh && cargo test --features ros2 --test ros2_dynamic_messages",
+      "status": "PARTIAL",
+      "claim": "Jazzy's installed runtime type support accepts exact sensor_msgs/Image 32FC1-meter and rectified CameraInfo fields with matching headers; a live subscriber has not yet received scanner frames"
     },
     {
       "id": "depth-image-proc",

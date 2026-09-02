@@ -358,7 +358,7 @@ fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     };
     let mut prefix = Vec::with_capacity(16);
     let mut parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
-    let mut frame_sizes = Vec::new();
+    let mut decoded_frames = Vec::new();
     let mut decoded_prefix = Vec::new();
     let mut frame_error: Option<Box<dyn Error>> = None;
     let received = depth_stream::capture_depth_prefix(address, limits, PREFIX_BYTES, |chunk| {
@@ -375,7 +375,7 @@ fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
                                         &decoded.bytes[..decoded.bytes.len().min(64)],
                                     );
                                 }
-                                frame_sizes.push((decoded.compressed_len, decoded.decompressed_len))
+                                decoded_frames.push(decoded)
                             }
                             Err(error) => {
                                 frame_error = Some(Box::new(error));
@@ -392,15 +392,25 @@ fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
         return Err(error);
     }
     let resolution = depth_stream::get_current_depth_resolution(address, limits)?;
-    let expected_frame_bytes = resolution
-        .frame_bytes()
-        .ok_or_else(|| failure("current depth resolution overflows the platform"))?;
-    if frame_sizes
-        .iter()
-        .any(|(_, decoded)| *decoded as usize != expected_frame_bytes)
-    {
+    if resolution.bytes_per_pixel != 2 {
         return Err(failure(
-            "decoded frame length disagrees with the scanner's current resolution",
+            "configured depth profile did not produce two-byte Z16 elements",
+        ));
+    }
+    let millimeters_per_unit = depth_stream::get_depth_scale_mm(address, limits)?;
+    let mut frame_receipts = Vec::with_capacity(decoded_frames.len());
+    for decoded in decoded_frames {
+        let compressed_len = decoded.compressed_len;
+        let plane =
+            decoded.into_z16_plane(resolution.width, resolution.height, millimeters_per_unit)?;
+        let statistics = plane.statistics();
+        frame_receipts.push((
+            compressed_len,
+            plane.bytes.len(),
+            statistics.nonzero_samples,
+            statistics.minimum_nonzero_raw,
+            statistics.maximum_raw,
+            statistics.mean_nonzero_mm,
         ));
     }
     let prefix = prefix
@@ -414,12 +424,12 @@ fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
         .collect::<Vec<_>>()
         .join(" ");
     println!(
-        "Depth stream smoke passed: bytes={received}, resolution={}x{}x{}, stride={}, complete_frames={}, sizes_compressed_to_raw={frame_sizes:?}, wire_prefix={prefix}, decoded_prefix={decoded_prefix}",
+        "Depth stream smoke passed: bytes={received}, resolution={}x{}x{}, stride={}, millimeters_per_unit={millimeters_per_unit}, complete_frames={}, frame_receipts=(compressed_bytes,raw_bytes,nonzero,min_raw,max_raw,mean_nonzero_mm){frame_receipts:?}, wire_prefix={prefix}, decoded_prefix={decoded_prefix}",
         resolution.width,
         resolution.height,
         resolution.bytes_per_pixel,
         resolution.stride_bytes().expect("validated resolution"),
-        frame_sizes.len()
+        frame_receipts.len()
     );
     Ok(())
 }

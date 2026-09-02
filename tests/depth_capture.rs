@@ -46,6 +46,15 @@ fn configures_captures_a_prefix_and_closes_the_stream() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
     let address = listener.local_addr().expect("fixture address");
     let server = thread::spawn(move || {
+        let (mut profile, _) = listener.accept().expect("accept profile request");
+        assert_eq!(
+            read_path(&mut profile),
+            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_display_reso=1&&set_display_width=640&&set_display_height=400&&set_display_type=2"
+        );
+        profile
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write profile response");
+
         let (mut start, _) = listener.accept().expect("accept start request");
         assert_eq!(
             read_path(&mut start),
@@ -86,6 +95,15 @@ fn closes_the_scanner_stream_after_a_capture_error() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
     let address = listener.local_addr().expect("fixture address");
     let server = thread::spawn(move || {
+        let (mut profile, _) = listener.accept().expect("accept profile request");
+        assert_eq!(
+            read_path(&mut profile),
+            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_display_reso=1&&set_display_width=640&&set_display_height=400&&set_display_type=2"
+        );
+        profile
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write profile response");
+
         let (mut start, _) = listener.accept().expect("accept start request");
         assert_eq!(
             read_path(&mut start),
@@ -134,6 +152,15 @@ fn carries_fragmented_http_bytes_into_complete_frame_envelopes() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
     let address = listener.local_addr().expect("fixture address");
     let server = thread::spawn(move || {
+        let (mut profile, _) = listener.accept().expect("accept profile request");
+        assert_eq!(
+            read_path(&mut profile),
+            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_display_reso=1&&set_display_width=640&&set_display_height=400&&set_display_type=2"
+        );
+        profile
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write profile response");
+
         let (mut start, _) = listener.accept().expect("accept start request");
         read_path(&mut start);
         start

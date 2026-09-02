@@ -1,4 +1,4 @@
-use revopoint_pop3_wifi::depth_decode::decode_quicklz;
+use revopoint_pop3_wifi::depth_decode::{decode_quicklz, DecodedDepth, DepthEncoding};
 use revopoint_pop3_wifi::frame_envelope::CompressedFrame;
 
 fn frame(payload: &[u8]) -> CompressedFrame {
@@ -50,4 +50,86 @@ fn rejects_decompressed_output_above_the_limit_before_allocation() {
     let error = decode_quicklz(&frame(&encoded), 1024).expect_err("oversize must fail");
 
     assert!(error.to_string().contains("limit"));
+}
+
+#[test]
+fn wraps_an_exact_decoded_buffer_as_explicit_metric_z16() {
+    let decoded = DecodedDepth {
+        flags: 0x47,
+        compressed_len: 9,
+        decompressed_len: 12,
+        bytes: (0_u8..12).collect(),
+    };
+
+    let plane = decoded.into_z16_plane(3, 2, 0.1).expect("valid Z16 plane");
+
+    assert_eq!(plane.width, 3);
+    assert_eq!(plane.height, 2);
+    assert_eq!(plane.stride_bytes, 6);
+    assert_eq!(plane.encoding, DepthEncoding::Z16LittleEndian);
+    assert_eq!(plane.millimeters_per_unit, 0.1);
+    assert_eq!(plane.bytes, (0_u8..12).collect::<Vec<_>>());
+}
+
+#[test]
+fn rejects_inconsistent_z16_layout_and_invalid_scale() {
+    for (width, height, scale) in [
+        (4, 2, 0.1),
+        (0, 2, 0.1),
+        (3, 0, 0.1),
+        (3, 2, 0.0),
+        (3, 2, f32::NAN),
+    ] {
+        let decoded = DecodedDepth {
+            flags: 0x47,
+            compressed_len: 9,
+            decompressed_len: 12,
+            bytes: vec![0; 12],
+        };
+
+        assert!(decoded.into_z16_plane(width, height, scale).is_err());
+    }
+
+    let inconsistent_header = DecodedDepth {
+        flags: 0x47,
+        compressed_len: 9,
+        decompressed_len: 10,
+        bytes: vec![0; 12],
+    };
+    assert!(inconsistent_header.into_z16_plane(3, 2, 0.1).is_err());
+
+    for (width, height) in [(0, 2), (3, 0)] {
+        let decoded = DecodedDepth {
+            flags: 0x47,
+            compressed_len: 9,
+            decompressed_len: 12,
+            bytes: vec![0; 12],
+        };
+        assert_eq!(
+            decoded
+                .into_z16_plane(width, height, 0.1)
+                .expect_err("zero dimension must fail as metadata")
+                .to_string(),
+            "invalid Z16 plane metadata"
+        );
+    }
+}
+
+#[test]
+fn reports_z16_statistics_in_raw_units_and_millimeters() {
+    let decoded = DecodedDepth {
+        flags: 0x47,
+        compressed_len: 9,
+        decompressed_len: 6,
+        bytes: vec![0, 0, 10, 0, 20, 0],
+    };
+    let plane = decoded.into_z16_plane(3, 1, 0.1).expect("Z16 plane");
+
+    let statistics = plane.statistics();
+
+    assert_eq!(statistics.samples, 3);
+    assert_eq!(statistics.nonzero_samples, 2);
+    assert_eq!(statistics.minimum_nonzero_raw, Some(10));
+    assert_eq!(statistics.maximum_raw, 20);
+    assert!((statistics.mean_nonzero_mm.expect("nonzero mean") - 1.5).abs() < 0.000_001);
 }

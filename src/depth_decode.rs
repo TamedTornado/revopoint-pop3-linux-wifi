@@ -11,6 +11,98 @@ pub struct DecodedDepth {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DepthEncoding {
+    Z16LittleEndian,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct DepthPlane {
+    pub width: u32,
+    pub height: u32,
+    pub stride_bytes: usize,
+    pub encoding: DepthEncoding,
+    pub millimeters_per_unit: f32,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DepthStatistics {
+    pub samples: usize,
+    pub nonzero_samples: usize,
+    pub minimum_nonzero_raw: Option<u16>,
+    pub maximum_raw: u16,
+    pub mean_nonzero_mm: Option<f64>,
+}
+
+impl DepthPlane {
+    pub fn statistics(&self) -> DepthStatistics {
+        let mut nonzero_samples = 0_usize;
+        let mut minimum_nonzero_raw = None;
+        let mut maximum_raw = 0_u16;
+        let mut sum_nonzero_raw = 0_u64;
+        let (samples, remainder) = self.bytes.as_chunks::<2>();
+        debug_assert!(remainder.is_empty(), "validated Z16 buffer has even length");
+        for bytes in samples {
+            let value = u16::from_le_bytes([bytes[0], bytes[1]]);
+            maximum_raw = maximum_raw.max(value);
+            if value != 0 {
+                nonzero_samples += 1;
+                sum_nonzero_raw += u64::from(value);
+                minimum_nonzero_raw =
+                    Some(minimum_nonzero_raw.map_or(value, |minimum: u16| minimum.min(value)));
+            }
+        }
+        let mean_nonzero_mm = (nonzero_samples != 0).then(|| {
+            (sum_nonzero_raw as f64 / nonzero_samples as f64) * f64::from(self.millimeters_per_unit)
+        });
+        DepthStatistics {
+            samples: self.bytes.len() / 2,
+            nonzero_samples,
+            minimum_nonzero_raw,
+            maximum_raw,
+            mean_nonzero_mm,
+        }
+    }
+}
+
+impl DecodedDepth {
+    pub fn into_z16_plane(
+        self,
+        width: u32,
+        height: u32,
+        millimeters_per_unit: f32,
+    ) -> Result<DepthPlane, DepthDecodeError> {
+        if width == 0
+            || height == 0
+            || !millimeters_per_unit.is_finite()
+            || millimeters_per_unit <= 0.0
+        {
+            return Err(fail("invalid Z16 plane metadata"));
+        }
+        let stride_bytes = usize::try_from(width)
+            .ok()
+            .and_then(|width| width.checked_mul(2))
+            .ok_or_else(|| fail("Z16 stride overflows the platform"))?;
+        let expected_bytes = usize::try_from(height)
+            .ok()
+            .and_then(|height| stride_bytes.checked_mul(height))
+            .ok_or_else(|| fail("Z16 frame size overflows the platform"))?;
+        if self.bytes.len() != expected_bytes || self.decompressed_len as usize != expected_bytes {
+            return Err(fail("decoded buffer length disagrees with Z16 layout"));
+        }
+
+        Ok(DepthPlane {
+            width,
+            height,
+            stride_bytes,
+            encoding: DepthEncoding::Z16LittleEndian,
+            millimeters_per_unit,
+            bytes: self.bytes,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct DepthDecodeError(String);
 

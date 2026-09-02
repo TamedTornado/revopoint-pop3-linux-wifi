@@ -45,14 +45,24 @@ available, and sizes its destination as width times height times format bits,
 rounded to bytes. The project uses the independently published `quicklz` Rust
 crate rather than copying or translating that routine.
 
-The scanner's read-only `get_depth_reso` endpoint reported
-`curr-resolution` as `640x800x2` during the same session. Its full response also
-advertised separate depth, calibration, depth-plus-IR, and depth-plus-IR-plus-P
-profiles. The client parses that current profile as width 640, height 800, two
-bytes per pixel, and a 1,280-byte stride. Every hardware-decoded frame is
-required to equal the resulting 1,024,000-byte frame size. We have not yet
-assigned the advertised components to the decompressed plane or claimed a
-metric pixel interpretation.
+The official binary configures network depth profiles with explicit display
+width, height, and stream-format values. Revopoint's public SDK headers identify
+format value 2 as Z16: one unsigned 16-bit depth value per pixel. The client now
+selects 640x400 Z16 explicitly before opening media rather than relying on the
+scanner's previous state.
+
+The scanner's read-only `get_depth_reso` endpoint then reports
+`curr-resolution` as `640x400x2`. The client parses that as width 640, height
+400, two bytes per pixel, a 1,280-byte stride, and a 512,000-byte frame. Every
+hardware-decoded frame must match that layout exactly before becoming an owned
+little-endian Z16 plane.
+
+The official SDK describes its depth scale as the physical millimeters
+represented by one raw depth unit. Binary inspection established that the
+network implementation reads property command `0x918` and calculates the scale
+as one divided by the returned integer. The scanner's read-only response
+returned divisor 10, so this device's observed scale is 0.1 mm per raw unit.
+Intrinsics and invalid-pixel semantics remain to be established independently.
 
 ## Current hardware receipt
 
@@ -61,3 +71,9 @@ envelopes inside a bounded 1 MiB capture. Every complete payload decompressed to
 exactly 1,024,000 bytes; one representative run had compressed sizes 233,528,
 234,171, 238,701, and 238,274 bytes. The fifth frame was intentionally cut off
 by the acquisition limit and was not counted.
+
+After explicit Z16 selection, four further hardware frames each decompressed to
+exactly 512,000 bytes. One bounded run found 255,997 nonzero samples per
+256,000-pixel frame and mean nonzero depths from 190.47 to 190.76 mm using the
+device-reported scale. Minimum and maximum raw values are retained as diagnostic
+receipts but are not yet treated as validated range limits.

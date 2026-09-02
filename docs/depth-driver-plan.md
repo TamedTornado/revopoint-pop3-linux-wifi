@@ -19,6 +19,9 @@ milestone.
 - ROS is an adapter over calibrated frames, not the internal data model.
 - Point clouds are derived by standard ROS tooling for this milestone.
 - A fixture pass cannot be presented as hardware qualification.
+- Dependency resolution uses a date-pinned Cargo nightly with native
+  `min-publish-age` enforcement and a global seven-day publication quarantine.
+  Exceptions require Jason's explicit authorization.
 
 ## Delivery sequence
 
@@ -33,6 +36,13 @@ Create a reusable library boundary, deterministic unit tests, offline
 integration tests through public process/network boundaries, a small
 qualification matrix, and Ubuntu 24.04 CI. Hardware-only cells remain visibly
 unclaimed by CI.
+
+### 1a. Enforce dependency publication age ([#10](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/10))
+
+Pin the reviewed Cargo nightly, enable its native publication-age resolver,
+deny incompatible ages, and set a global seven-day floor. Retain an empty,
+explicit exception manifest unless Jason authorizes an exact exception. Audit
+the resulting lockfile separately as defense in depth.
 
 ### 2. Acquire a bounded network stream ([#2](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/2))
 

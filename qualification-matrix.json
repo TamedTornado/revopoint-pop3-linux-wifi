@@ -4,6 +4,7 @@
   "claims": {
     "deterministic_tests_pass": true,
     "offline_integration_pass": true,
+    "native_dependency_quarantine_pass": true,
     "mutation_tests_pass": false,
     "hardware_depth_frames_pass": false,
     "ros_depth_camera_pass": false,
@@ -33,6 +34,14 @@
       "command": "cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings",
       "status": "PASS",
       "claim": "Tracked Rust sources are formatted and warning-free"
+    },
+    {
+      "id": "cargo-publication-age",
+      "tier": "supply-chain",
+      "environment": "Pinned nightly-2026-08-17 Cargo",
+      "command": "cargo metadata --locked --format-version 1 && scripts/audit-cargo-publish-age",
+      "status": "PASS",
+      "claim": "Pinned native Cargo resolution denies crates.io versions younger than seven days and the complete lockfile passes an independent age audit"
     },
     {
       "id": "mutation",

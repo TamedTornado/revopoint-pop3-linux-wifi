@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+policy="${POP3_CARGO_AGE_POLICY:-${repo_root}/security/cargo-publish-age-policy.json}"
+exceptions="${POP3_CARGO_AGE_EXCEPTIONS:-${repo_root}/security/cargo-publish-age-exceptions.json}"
+lock_file="${POP3_CARGO_AGE_LOCKFILE:-${repo_root}/Cargo.lock}"
+index_cache="${POP3_CARGO_AGE_INDEX_CACHE:-}"
+now_epoch="${POP3_CARGO_AGE_NOW_EPOCH:-$(date -u +%s)}"
+
+fail() {
+    echo "audit-cargo-publish-age: error: $*" >&2
+    exit 1
+}
+
+for dependency in awk cargo date find jq sort tr; do
+    command -v "${dependency}" >/dev/null || fail "${dependency} is required"
+done
+
+jq -e '
+    .schema_version == 1 and
+    .minimum_age_seconds == 604800 and
+    .minimum_age == "7 days" and
+    .resolver_toolchain == "nightly-2026-08-17" and
+    .exceptions_manifest == "security/cargo-publish-age-exceptions.json"
+' "${policy}" >/dev/null || fail "policy is malformed"
+
+jq -e '.schema_version == 1 and .exceptions == []' "${exceptions}" >/dev/null ||
+    fail "exceptions must remain empty without Jason's explicit authorization"
+
+[[ -f "${lock_file}" ]] || fail "Cargo.lock is missing"
+[[ "${now_epoch}" =~ ^[0-9]+$ ]] || fail "current epoch is invalid"
+
+if [[ -z "${index_cache}" ]]; then
+    cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
+    mapfile -t candidates < <(
+        find "${cargo_home}/registry/index" -mindepth 1 -maxdepth 1 -type d \
+            -name 'index.crates.io-*' -print 2>/dev/null | sort
+    )
+    (( ${#candidates[@]} == 1 )) || fail "exactly one crates.io index cache is required"
+    index_cache="${candidates[0]}/.cache"
+fi
+[[ -d "${index_cache}" ]] || fail "crates.io index cache is missing"
+
+crate_cache_path() {
+    local name lower length
+    name="$1"
+    lower="$(tr '[:upper:]' '[:lower:]' <<<"${name}")"
+    lower="${lower%$'\n'}"
+    length="${#lower}"
+    case "${length}" in
+        1) printf '%s/1/%s\n' "${index_cache}" "${lower}" ;;
+        2) printf '%s/2/%s\n' "${index_cache}" "${lower}" ;;
+        3) printf '%s/3/%s/%s\n' "${index_cache}" "${lower:0:1}" "${lower}" ;;
+        *) printf '%s/%s/%s/%s\n' "${index_cache}" "${lower:0:2}" "${lower:2:2}" "${lower}" ;;
+    esac
+}
+
+packages=0
+failures=0
+while IFS=$'\t' read -r name version; do
+    packages=$((packages + 1))
+    cache_file="$(crate_cache_path "${name}")"
+    [[ -f "${cache_file}" ]] || fail "index metadata is missing for ${name}@${version}"
+    record="$(tr '\0' '\n' <"${cache_file}" | jq -Rce \
+        --arg name "${name}" --arg version "${version}" \
+        'fromjson? | select(.name == $name and .vers == $version)' | tail -1)"
+    [[ -n "${record}" ]] || fail "version metadata is missing for ${name}@${version}"
+    publish_time="$(jq -r '.pubtime // empty' <<<"${record}")"
+    [[ -n "${publish_time}" ]] || fail "publication time is missing for ${name}@${version}"
+    publish_epoch="$(date -u -d "${publish_time}" +%s 2>/dev/null)" ||
+        fail "publication time is malformed for ${name}@${version}"
+    age_seconds=$((now_epoch - publish_epoch))
+    if (( age_seconds < 604800 )); then
+        echo "audit-cargo-publish-age: rejected ${name}@${version}, age=${age_seconds}s" >&2
+        failures=$((failures + 1))
+    fi
+done < <(
+    awk '
+        function unquote(value) {
+            sub(/^[^=]*=[[:space:]]*"/, "", value)
+            sub(/"[[:space:]]*$/, "", value)
+            return value
+        }
+        function emit() {
+            if (name != "" && version != "" && source == "registry+https://github.com/rust-lang/crates.io-index") {
+                print name "\t" version
+            }
+        }
+        /^\[\[package\]\]$/ { emit(); name=""; version=""; source=""; next }
+        /^name[[:space:]]*=/ { name=unquote($0); next }
+        /^version[[:space:]]*=/ { version=unquote($0); next }
+        /^source[[:space:]]*=/ { source=unquote($0); next }
+        END { emit() }
+    ' "${lock_file}" | sort -u
+)
+
+(( packages > 0 )) || fail "Cargo.lock contains no crates.io packages"
+(( failures == 0 )) || exit 1
+echo "audit-cargo-publish-age: PASS packages=${packages} exceptions=0"

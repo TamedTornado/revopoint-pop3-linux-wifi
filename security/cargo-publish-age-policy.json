@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "minimum_age_seconds": 604800,
+  "minimum_age": "7 days",
+  "resolver_toolchain": "nightly-2026-08-17",
+  "exceptions_manifest": "security/cargo-publish-age-exceptions.json"
+}
+

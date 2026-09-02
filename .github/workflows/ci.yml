@@ -24,7 +24,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921
         with:
-          toolchain: stable
+          toolchain: nightly-2026-08-17
           components: rustfmt, clippy
 
       - name: Install system dependencies
@@ -39,6 +39,23 @@ jobs:
             (.statuses as $statuses |
               all(.cells[]; .status as $status | $statuses | index($status) != null))
           ' qualification-matrix.json >/dev/null
+
+      - name: Validate native Cargo publication-age policy
+        run: |
+          test "$(rustup show active-toolchain | awk '{print $1}')" = "nightly-2026-08-17-x86_64-unknown-linux-gnu"
+          grep -Fxq 'min-publish-age = true' .cargo/config.toml
+          grep -Fxq 'incompatible-publish-age = "deny"' .cargo/config.toml
+          grep -Fxq 'global-min-publish-age = "7 days"' .cargo/config.toml
+          jq -e '
+            .minimum_age_seconds == 604800 and
+            .minimum_age == "7 days" and
+            .resolver_toolchain == "nightly-2026-08-17" and
+            .exceptions_manifest == "security/cargo-publish-age-exceptions.json"
+          ' security/cargo-publish-age-policy.json >/dev/null
+          jq -e '.schema_version == 1 and .exceptions == []' \
+            security/cargo-publish-age-exceptions.json >/dev/null
+          cargo metadata --locked --format-version 1 >/dev/null
+          scripts/audit-cargo-publish-age
 
       - name: Check formatting
         run: cargo fmt --check

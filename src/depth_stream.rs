@@ -2,13 +2,20 @@ use crate::http_stream::{get_bounded_body, get_chunked_prefix, StreamError, Stre
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::net::SocketAddr;
+use std::thread;
+use std::time::Duration;
 
-const SET_DEPTH_FORMAT: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=1";
+// The network SDK maps STREAM_FORMAT_Z16 to firmware selector 2. Selector 1
+// requests the binocular infrared pair, whose adjacent Y8 bytes can look like
+// plausible but false little-endian depths.
+const SET_DEPTH_FORMAT: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=2";
 const SET_DEPTH_PROFILE: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_display_reso=1&&set_display_width=640&&set_display_height=400&&set_display_type=2";
 const GET_DEPTH_RESOLUTION: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&get_depth_reso";
 const GET_DEPTH_SCALE: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&algo_get_cmd_buf=2328";
 const DEPTH_MEDIA: &str = "/cgi-bin/zx_media.cgi?camera_id=21";
 const CLOSE_STREAMS: &str = "/cgi-bin/zx_cmd.cgi?close_stream_all";
+const PROFILE_SETTLE_TIME: Duration = Duration::from_millis(300);
+const SELECTOR_ATTEMPTS: usize = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DepthResolution {
@@ -181,14 +188,29 @@ pub fn capture_depth_prefix(
         return Err(DepthStreamError::RejectedProfile);
     }
 
-    let configuration = get_bounded_body(address, SET_DEPTH_FORMAT, limits).map_err(|source| {
-        DepthStreamError::Http {
-            stage: "configure depth output",
-            source,
+    // RevoScan's Windows SDK gives the resolution change 300 ms to settle,
+    // then retries the output-selector command up to three times. It does not
+    // reboot or reconnect the scanner when changing selectors.
+    thread::sleep(PROFILE_SETTLE_TIME);
+    for attempt in 0..SELECTOR_ATTEMPTS {
+        match get_bounded_body(address, SET_DEPTH_FORMAT, limits) {
+            Ok(configuration) if trim_ascii_whitespace(&configuration) == br#"{"result":0}"# => {
+                break;
+            }
+            Ok(_) => {
+                if attempt + 1 == SELECTOR_ATTEMPTS {
+                    return Err(DepthStreamError::RejectedConfiguration);
+                }
+            }
+            Err(source) => {
+                if attempt + 1 == SELECTOR_ATTEMPTS {
+                    return Err(DepthStreamError::Http {
+                        stage: "configure depth output",
+                        source,
+                    });
+                }
+            }
         }
-    })?;
-    if trim_ascii_whitespace(&configuration) != br#"{"result":0}"# {
-        return Err(DepthStreamError::RejectedConfiguration);
     }
 
     let capture = get_chunked_prefix(address, DEPTH_MEDIA, limits, prefix_bytes, receive);

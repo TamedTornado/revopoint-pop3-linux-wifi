@@ -1,11 +1,12 @@
-use revopoint_pop3_wifi::depth_stream::capture_depth_prefix;
+use revopoint_pop3_wifi::depth_stream::{capture_depth_prefix, DepthStreamError};
 use revopoint_pop3_wifi::frame_envelope::FrameEnvelopeParser;
 use revopoint_pop3_wifi::http_stream::StreamLimits;
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn read_path(stream: &mut impl Read) -> String {
     let mut request = Vec::new();
@@ -58,7 +59,7 @@ fn configures_captures_a_prefix_and_closes_the_stream() {
         let (mut start, _) = listener.accept().expect("accept start request");
         assert_eq!(
             read_path(&mut start),
-            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=1"
+            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=2"
         );
         start
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 14\r\n\r\n{\"result\":0}\r\n")
@@ -107,7 +108,7 @@ fn closes_the_scanner_stream_after_a_capture_error() {
         let (mut start, _) = listener.accept().expect("accept start request");
         assert_eq!(
             read_path(&mut start),
-            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=1"
+            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=2"
         );
         start
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
@@ -202,4 +203,145 @@ fn carries_fragmented_http_bytes_into_complete_frame_envelopes() {
     assert_eq!(payloads, [b"first".to_vec(), b"second".to_vec()]);
     parser.finish().expect("complete frame stream");
     server.join().expect("fixture server");
+}
+
+#[test]
+fn retries_a_rejected_depth_selector_without_power_cycling() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let (mut profile, _) = listener.accept().expect("accept profile request");
+        read_path(&mut profile);
+        profile
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write profile response");
+
+        let (mut first, _) = listener.accept().expect("accept first selector request");
+        assert_eq!(read_path(&mut first), SET_DEPTH_SELECTOR_PATH);
+        first
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":1}")
+            .expect("reject first selector request");
+
+        listener
+            .set_nonblocking(true)
+            .expect("make retry listener nonblocking");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut second = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "selector was not retried");
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("accept selector retry: {error}"),
+            }
+        };
+        assert_eq!(read_path(&mut second), SET_DEPTH_SELECTOR_PATH);
+        second
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("accept second selector request");
+
+        let mut media = accept_before(&listener, deadline, "media request");
+        read_path(&mut media);
+        media
+            .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n")
+            .expect("write media response");
+
+        let mut close = accept_before(&listener, deadline, "close request");
+        read_path(&mut close);
+        close
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write close response");
+    });
+
+    let result = capture_depth_prefix(address, limits(), 1, |_| {});
+    let server_result = server.join();
+    assert!(
+        server_result.is_ok(),
+        "fixture server failed: {server_result:?}"
+    );
+    assert_eq!(result.expect("capture after selector retry"), 1);
+}
+
+#[test]
+fn stops_after_three_firmware_rejections() {
+    let (result, attempts) = capture_with_repeated_selector_response(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":1}",
+    );
+
+    assert_eq!(attempts, 3);
+    assert!(result
+        .expect_err("three rejected selectors must fail")
+        .to_string()
+        .contains("rejected the depth output configuration"));
+}
+
+#[test]
+fn stops_after_three_selector_http_failures_and_preserves_the_cause() {
+    let (result, attempts) = capture_with_repeated_selector_response(
+        b"HTTP/1.1 500 Failed\r\nContent-Length: 0\r\n\r\n",
+    );
+
+    assert_eq!(attempts, 3);
+    let error = result.expect_err("three failed selector requests must fail");
+    assert!(error.to_string().contains("configure depth output"));
+    assert!(error.to_string().contains("500"));
+}
+
+fn capture_with_repeated_selector_response(
+    selector_response: &'static [u8],
+) -> (Result<usize, DepthStreamError>, usize) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let (done_tx, done_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut profile, _) = listener.accept().expect("accept profile request");
+        read_path(&mut profile);
+        profile
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write profile response");
+        listener
+            .set_nonblocking(true)
+            .expect("make selector listener nonblocking");
+
+        let mut attempts = 0;
+        loop {
+            match listener.accept() {
+                Ok((mut selector, _)) => {
+                    assert_eq!(read_path(&mut selector), SET_DEPTH_SELECTOR_PATH);
+                    selector
+                        .write_all(selector_response)
+                        .expect("write repeated selector response");
+                    attempts += 1;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if done_rx.try_recv().is_ok() {
+                        return attempts;
+                    }
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("accept selector request: {error}"),
+            }
+        }
+    });
+
+    let result = capture_depth_prefix(address, limits(), 1, |_| {});
+    done_tx.send(()).expect("notify fixture server");
+    let attempts = server.join().expect("fixture server");
+    (result, attempts)
+}
+
+const SET_DEPTH_SELECTOR_PATH: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=2";
+
+fn accept_before(listener: &TcpListener, deadline: Instant, stage: &str) -> std::net::TcpStream {
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => return stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(Instant::now() < deadline, "timed out waiting for {stage}");
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => panic!("accept {stage}: {error}"),
+        }
+    }
 }

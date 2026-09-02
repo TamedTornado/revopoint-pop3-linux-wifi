@@ -51,6 +51,13 @@ format value 2 as Z16: one unsigned 16-bit depth value per pixel. The client now
 selects 640x400 Z16 explicitly before opening media rather than relying on the
 scanner's previous state.
 
+The Windows binary's network start path changes that selection in place; it
+does not power-cycle the scanner. For Z16 it sends the 640x400 profile with
+display type 2, waits 300 ms, then sends depth-output selector 2. The selector
+request is attempted at most three times before startup fails. Only after the
+selector succeeds does it open the depth media stream. The Rust acquisition
+path follows that same ordering, delay, and retry bound.
+
 The scanner's read-only `get_depth_reso` endpoint then reports
 `curr-resolution` as `640x400x2`. The client parses that as width 640, height
 400, two bytes per pixel, a 1,280-byte stride, and a 512,000-byte frame. Every

@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "statuses": ["PASS", "FAIL", "BLOCKED", "NOT_IMPLEMENTED"],
+  "statuses": ["PASS", "FAIL", "PARTIAL", "BLOCKED", "NOT_IMPLEMENTED"],
   "claims": {
     "deterministic_tests_pass": true,
     "offline_integration_pass": true,
     "native_dependency_quarantine_pass": true,
     "mutation_tests_pass": false,
+    "hardware_depth_bytes_pass": true,
     "hardware_depth_frames_pass": false,
     "ros_depth_camera_pass": false,
     "rviz_live_acceptance_pass": false
@@ -25,7 +26,7 @@
       "environment": "Ubuntu 24.04, no scanner",
       "command": "cargo test --test '*'",
       "status": "PASS",
-      "claim": "The built CLI help boundary is tested without scanner hardware; the local HTTP boundary lands with stream acquisition"
+      "claim": "The built CLI and fragmented local HTTP boundaries cover bounded acquisition, timeout, truncation, response variants, and stream cleanup"
     },
     {
       "id": "quality",
@@ -47,12 +48,20 @@
       "id": "mutation",
       "tier": "mutation",
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
-      "command": "not implemented",
-      "status": "NOT_IMPLEMENTED",
-      "claim": "Viable mutants in deterministic protocol, decoder, and calibration logic are caught"
+      "command": "cargo mutants -f src/depth_stream.rs -j 1 --timeout 5",
+      "status": "PARTIAL",
+      "claim": "All eight viable depth-orchestration mutants are caught; surviving HTTP mutants and future parser, decoder, and calibration scopes remain open"
     },
     {
-      "id": "hardware-stream",
+      "id": "hardware-byte-stream",
+      "tier": "hardware",
+      "environment": "POP 3 Plus on reachable LAN",
+      "command": "cargo run --release -- --smoke-depth SCANNER_IP",
+      "status": "PASS",
+      "claim": "Five consecutive real-hardware runs each configured depth output, captured exactly 1048576 live bytes, closed the stream, and restarted successfully"
+    },
+    {
+      "id": "hardware-frames",
       "tier": "hardware",
       "environment": "POP 3 Plus on reachable LAN",
       "command": "not implemented",

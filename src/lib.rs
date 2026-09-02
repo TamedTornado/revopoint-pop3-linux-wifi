@@ -2,9 +2,11 @@ use rusb::{DeviceHandle, GlobalContext};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self, Write};
+use std::net::{IpAddr, SocketAddr};
 use std::thread;
 use std::time::Duration;
 
+pub mod depth_stream;
 pub mod http_stream;
 
 const VID: u16 = 0x2207;
@@ -342,26 +344,61 @@ fn run(write: bool, diagnose: bool) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
+    const PREFIX_BYTES: usize = 1024 * 1024;
+    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let limits = http_stream::StreamLimits {
+        connect_timeout: Duration::from_secs(3),
+        idle_timeout: Duration::from_secs(3),
+        total_timeout: Duration::from_secs(15),
+        max_header_bytes: 16 * 1024,
+        max_body_bytes: 2 * 1024 * 1024,
+    };
+    let mut prefix = Vec::with_capacity(16);
+    let received = depth_stream::capture_depth_prefix(address, limits, PREFIX_BYTES, |chunk| {
+        let remaining = 16_usize.saturating_sub(prefix.len());
+        prefix.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    })?;
+    let prefix = prefix
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    println!("Depth stream smoke passed: bytes={received}, prefix={prefix}");
+    Ok(())
+}
+
 pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
     let mut arguments = arguments.into_iter();
     let program = arguments
         .next()
         .unwrap_or_else(|| "revopoint-pop3-wifi".to_owned());
-    let (write, diagnose) = match (arguments.next().as_deref(), arguments.next()) {
-        (None, None) => (false, false),
-        (Some("--write"), None) => (true, false),
-        (Some("--diagnose"), None) => (false, true),
-        (Some("--help" | "-h"), None) => {
-            println!("Usage: {program} [--write | --diagnose]");
+    let arguments = arguments.collect::<Vec<_>>();
+    let (write, diagnose) = match arguments.as_slice() {
+        [] => (false, false),
+        [argument] if argument == "--write" => (true, false),
+        [argument] if argument == "--diagnose" => (false, true),
+        [argument, ip] if argument == "--smoke-depth" => {
+            return match smoke_depth(ip) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            }
+        }
+        [argument] if argument == "--help" || argument == "-h" => {
+            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
             println!("  --diagnose    Report scanner-side Wi-Fi diagnostics over USB");
+            println!("  --smoke-depth IP  Capture a bounded depth prefix over Wi-Fi");
             println!("  -h, --help    Show this help");
             return 0;
         }
         _ => {
-            eprintln!("Usage: {program} [--write | --diagnose]");
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP]");
             return 2;
         }
     };

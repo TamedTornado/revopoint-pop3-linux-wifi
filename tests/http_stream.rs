@@ -1,4 +1,6 @@
-use revopoint_pop3_wifi::http_stream::{get_chunked, get_chunked_prefix, StreamLimits};
+use revopoint_pop3_wifi::http_stream::{
+    get_bounded_body, get_chunked, get_chunked_prefix, get_content_length, StreamLimits,
+};
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::thread;
@@ -211,5 +213,98 @@ fn captures_an_exact_prefix_and_disconnects_without_waiting_for_stream_end() {
 
     assert_eq!(received, 5);
     assert_eq!(body, b"ABCDE");
+    server.join().expect("fixture server");
+}
+
+#[test]
+fn reads_fragmented_content_length_control_response() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let Some(mut stream) = accept_fixture(&listener) else {
+            return;
+        };
+        read_request(&mut stream);
+        for fragment in [
+            b"HTTP/1.1 200 OK\r\nContent-Len".as_slice(),
+            b"gth: 12\r\n\r\n{\"res".as_slice(),
+            b"ult\":0}".as_slice(),
+        ] {
+            stream.write_all(fragment).expect("write response fragment");
+        }
+    });
+
+    let body =
+        get_content_length(address, "/command", limits()).expect("read Content-Length response");
+
+    assert_eq!(body, br#"{"result":0}"#);
+    server.join().expect("fixture server");
+}
+
+#[test]
+fn reads_chunked_control_response_variant() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let Some(mut stream) = accept_fixture(&listener) else {
+            return;
+        };
+        read_request(&mut stream);
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n6\r\n\r\nDATA\r\n0\r\n\r\n",
+            )
+            .expect("write response");
+    });
+
+    let body =
+        get_bounded_body(address, "/command", limits()).expect("read chunked control response");
+
+    assert_eq!(body, b"\r\nDATA");
+    server.join().expect("fixture server");
+}
+
+#[test]
+fn rejects_a_truncated_chunk_payload() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let Some(mut stream) = accept_fixture(&listener) else {
+            return;
+        };
+        read_request(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nAB")
+            .expect("write truncated response");
+    });
+
+    let error =
+        get_chunked(address, "/stream", limits(), |_| {}).expect_err("truncated chunk must fail");
+
+    assert!(error.to_string().contains("ended unexpectedly"));
+    server.join().expect("fixture server");
+}
+
+#[test]
+fn stops_waiting_after_the_idle_timeout() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let Some(mut stream) = accept_fixture(&listener) else {
+            return;
+        };
+        read_request(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+            .expect("write response header");
+        thread::sleep(Duration::from_millis(150));
+    });
+    let mut short_idle = limits();
+    short_idle.idle_timeout = Duration::from_millis(40);
+
+    let error =
+        get_chunked(address, "/stream", short_idle, |_| {}).expect_err("idle stream must time out");
+
+    assert!(error.to_string().contains("timed out"));
     server.join().expect("fixture server");
 }

@@ -34,6 +34,61 @@ fn fail(message: impl Into<String>) -> StreamError {
     StreamError(message.into())
 }
 
+pub fn get_bounded_body(
+    address: SocketAddr,
+    path: &str,
+    limits: StreamLimits,
+) -> Result<Vec<u8>, StreamError> {
+    validate_request(path, limits)?;
+    let started = Instant::now();
+    let stream = open_get(address, path, limits)?;
+    let mut buffered = BufferedStream::new(stream, started, limits);
+    let header = buffered.read_header()?;
+    validate_success_status(&header)?;
+
+    if let Some(length) = content_length(&header)? {
+        if length > limits.max_body_bytes {
+            return Err(fail("HTTP response exceeds configured body limit"));
+        }
+        return buffered.read_exact_vec(length);
+    }
+    if is_chunked(&header)? {
+        let mut body = Vec::new();
+        read_chunked_body(&mut buffered, limits, None, |chunk| {
+            body.extend_from_slice(chunk)
+        })?;
+        return Ok(body);
+    }
+    Err(fail(
+        "HTTP control response has neither Content-Length nor chunked encoding",
+    ))
+}
+
+pub fn get_content_length(
+    address: SocketAddr,
+    path: &str,
+    limits: StreamLimits,
+) -> Result<Vec<u8>, StreamError> {
+    validate_request(path, limits)?;
+    let started = Instant::now();
+    let stream = open_get(address, path, limits)?;
+    let mut buffered = BufferedStream::new(stream, started, limits);
+    let header = buffered.read_header()?;
+    validate_success_status(&header)?;
+
+    let Some(length) = content_length(&header)? else {
+        let header_text =
+            std::str::from_utf8(&header).map_err(|_| fail("HTTP header is not UTF-8"))?;
+        return Err(fail(format!(
+            "HTTP control response must have one Content-Length; header={header_text:?}"
+        )));
+    };
+    if length > limits.max_body_bytes {
+        return Err(fail("HTTP response exceeds configured body limit"));
+    }
+    buffered.read_exact_vec(length)
+}
+
 pub fn get_chunked(
     address: SocketAddr,
     path: &str,
@@ -63,28 +118,24 @@ fn get_chunked_inner(
     path: &str,
     limits: StreamLimits,
     prefix_bytes: Option<usize>,
-    mut receive: impl FnMut(&[u8]),
+    receive: impl FnMut(&[u8]),
 ) -> Result<usize, StreamError> {
-    if !path.starts_with('/') || path.contains(['\r', '\n']) {
-        return Err(fail("HTTP path must be absolute and contain no newlines"));
-    }
-    if limits.max_header_bytes < 4 || limits.max_body_bytes == 0 {
-        return Err(fail("stream byte limits must be non-zero"));
-    }
-
+    validate_request(path, limits)?;
     let started = Instant::now();
-    let mut stream = TcpStream::connect_timeout(&address, limits.connect_timeout)?;
-    stream.set_write_timeout(Some(limits.idle_timeout))?;
-    write!(
-        stream,
-        "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\nAccept: */*\r\n\r\n"
-    )?;
-    stream.flush()?;
-
+    let stream = open_get(address, path, limits)?;
     let mut buffered = BufferedStream::new(stream, started, limits);
     let header = buffered.read_header()?;
     validate_response_header(&header)?;
 
+    read_chunked_body(&mut buffered, limits, prefix_bytes, receive)
+}
+
+fn read_chunked_body(
+    buffered: &mut BufferedStream,
+    limits: StreamLimits,
+    prefix_bytes: Option<usize>,
+    mut receive: impl FnMut(&[u8]),
+) -> Result<usize, StreamError> {
     let mut received = 0_usize;
     loop {
         let size_line = buffered.read_crlf_line(128)?;
@@ -126,10 +177,75 @@ fn get_chunked_inner(
     }
 }
 
-fn validate_response_header(header: &[u8]) -> Result<(), StreamError> {
+fn content_length(header: &[u8]) -> Result<Option<usize>, StreamError> {
     let header = std::str::from_utf8(header).map_err(|_| fail("HTTP header is not UTF-8"))?;
-    let mut lines = header.split("\r\n");
-    let status = lines
+    let lengths = header
+        .split("\r\n")
+        .filter_map(|line| line.split_once(':'))
+        .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+        .map(|(_, value)| value.trim())
+        .collect::<Vec<_>>();
+    match lengths.as_slice() {
+        [] => Ok(None),
+        [length] => length
+            .parse::<usize>()
+            .map(Some)
+            .map_err(|_| fail("HTTP Content-Length is invalid")),
+        _ => Err(fail("HTTP response has multiple Content-Length headers")),
+    }
+}
+
+fn is_chunked(header: &[u8]) -> Result<bool, StreamError> {
+    let header = std::str::from_utf8(header).map_err(|_| fail("HTTP header is not UTF-8"))?;
+    Ok(header
+        .split("\r\n")
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .any(|(name, value)| {
+            name.eq_ignore_ascii_case("transfer-encoding")
+                && value
+                    .split(',')
+                    .any(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"))
+        }))
+}
+
+fn validate_request(path: &str, limits: StreamLimits) -> Result<(), StreamError> {
+    if !path.starts_with('/') || path.contains(['\r', '\n']) {
+        return Err(fail("HTTP path must be absolute and contain no newlines"));
+    }
+    if limits.max_header_bytes < 4 || limits.max_body_bytes == 0 {
+        return Err(fail("stream byte limits must be non-zero"));
+    }
+    Ok(())
+}
+
+fn open_get(
+    address: SocketAddr,
+    path: &str,
+    limits: StreamLimits,
+) -> Result<TcpStream, StreamError> {
+    let mut stream = TcpStream::connect_timeout(&address, limits.connect_timeout)?;
+    stream.set_write_timeout(Some(limits.idle_timeout))?;
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\nAccept: */*\r\n\r\n"
+    )?;
+    stream.flush()?;
+    Ok(stream)
+}
+
+fn validate_response_header(header: &[u8]) -> Result<(), StreamError> {
+    validate_success_status(header)?;
+    if !is_chunked(header)? {
+        return Err(fail("HTTP stream response is not chunked"));
+    }
+    Ok(())
+}
+
+fn validate_success_status(header: &[u8]) -> Result<(), StreamError> {
+    let header = std::str::from_utf8(header).map_err(|_| fail("HTTP header is not UTF-8"))?;
+    let status = header
+        .split("\r\n")
         .next()
         .ok_or_else(|| fail("HTTP response has no status line"))?;
     let mut status_fields = status.split_whitespace();
@@ -142,17 +258,6 @@ fn validate_response_header(header: &[u8]) -> Result<(), StreamError> {
         return Err(fail(format!("HTTP stream request returned status {code}")));
     }
 
-    let chunked = lines
-        .filter_map(|line| line.split_once(':'))
-        .any(|(name, value)| {
-            name.eq_ignore_ascii_case("transfer-encoding")
-                && value
-                    .split(',')
-                    .any(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"))
-        });
-    if !chunked {
-        return Err(fail("HTTP stream response is not chunked"));
-    }
     Ok(())
 }
 

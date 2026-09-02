@@ -1,8 +1,9 @@
-# Revopoint POP 3 Linux Wi-Fi provisioning
+# Revopoint POP 3 Linux interoperability
 
-A small Linux-native utility for reading and setting a Revopoint POP 3 scanner's
-Wi-Fi client credentials over USB. It avoids installing or running Revo Scan,
-Windows, Wine, or a virtual machine.
+A Linux-native Rust project for interoperating with a Revopoint POP 3 scanner.
+It currently provisions Wi-Fi client credentials over USB and performs bounded
+depth-stream acquisition over the LAN. It avoids installing or running Revo
+Scan, Windows, Wine, or a virtual machine.
 
 This project is an independent interoperability implementation. It contains no
 Revopoint source code, SDK headers, binaries, firmware, application assets, or
@@ -28,6 +29,12 @@ The read path has been tested against real hardware. The write path:
 7. asks the scanner to sync the filesystem.
 
 It does **not** change firmware or send an upgrade command.
+
+The network acquisition path can configure the scanner's depth output, capture
+an exact byte count from its chunked HTTP media stream, and close the stream on
+success or failure. This is an acquisition milestone only: frame boundaries,
+depth decompression, calibration, and standard application output are not yet
+implemented.
 
 ## Build
 
@@ -83,6 +90,32 @@ both writing the client credentials and disabling the scanner's own access point
 After a successful write, disconnect the USB data cable and power-cycle the
 scanner from a power adapter or power bank. When powered through a computer's USB
 data connection, the scanner normally remains in USB mode.
+
+## Smoke-test depth acquisition
+
+With the scanner powered independently and connected to the same LAN, provide
+its IPv4 address:
+
+```sh
+cargo run --release -- --smoke-depth 192.168.8.245
+```
+
+The command captures exactly 1 MiB into a bounded reader, retains only the first
+16 bytes for display, closes the scanner stream, and exits. It is intended as a
+hardware diagnostic rather than a file format or visualization tool.
+
+Example output:
+
+```text
+Depth stream smoke passed: bytes=1048576, prefix=0d 0a 0d 0a 44 33 22 11 ...
+```
+
+Offline network-boundary tests use loopback fixture servers and require no
+scanner:
+
+```sh
+cargo test --test http_stream --test depth_capture
+```
 
 ## Important limitations
 

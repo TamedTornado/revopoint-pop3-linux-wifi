@@ -51,6 +51,12 @@ Test fragmentation, timeout, truncation, non-success responses, limits, and
 clean close behavior against a local server. Retain an opt-in real-scanner
 smoke command.
 
+Completed acquisition evidence: offline fixtures cover fragmented chunked and
+Content-Length responses, truncation, timeout, bounds, and cleanup after error.
+Five consecutive hardware smokes each captured exactly 1 MiB and successfully
+closed and restarted the scanner stream. This does not claim complete frames;
+frame recovery remains phase 3.
+
 ### 3. Recover complete frame envelopes ([#3](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/3))
 
 Identify only the wire fields required to delimit and validate frames. Test

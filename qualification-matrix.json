@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "statuses": ["PASS", "FAIL", "BLOCKED", "NOT_IMPLEMENTED"],
+  "claims": {
+    "deterministic_tests_pass": true,
+    "offline_integration_pass": true,
+    "hardware_depth_frames_pass": false,
+    "ros_depth_camera_pass": false,
+    "rviz_live_acceptance_pass": false
+  },
+  "cells": [
+    {
+      "id": "unit",
+      "tier": "unit",
+      "environment": "Ubuntu 24.04 or compatible Linux",
+      "command": "cargo test --lib",
+      "status": "PASS",
+      "claim": "Pure provisioning logic is deterministic; depth contracts are added red-first"
+    },
+    {
+      "id": "offline-integration",
+      "tier": "integration",
+      "environment": "Ubuntu 24.04, no scanner",
+      "command": "cargo test --test '*'",
+      "status": "PASS",
+      "claim": "The built CLI help boundary is tested without scanner hardware; the local HTTP boundary lands with stream acquisition"
+    },
+    {
+      "id": "quality",
+      "tier": "static",
+      "environment": "Ubuntu 24.04 or compatible Linux",
+      "command": "cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings",
+      "status": "PASS",
+      "claim": "Tracked Rust sources are formatted and warning-free"
+    },
+    {
+      "id": "hardware-stream",
+      "tier": "hardware",
+      "environment": "POP 3 Plus on reachable LAN",
+      "command": "not implemented",
+      "status": "NOT_IMPLEMENTED",
+      "claim": "The Rust client receives bounded complete depth frames from real hardware"
+    },
+    {
+      "id": "metric-depth",
+      "tier": "hardware",
+      "environment": "POP 3 Plus and measured physical targets",
+      "command": "not implemented",
+      "status": "NOT_IMPLEMENTED",
+      "claim": "Decoded pixels have verified metric scale, invalid semantics, and calibration"
+    },
+    {
+      "id": "ros-contract",
+      "tier": "ros-integration",
+      "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
+      "command": "not implemented",
+      "status": "NOT_IMPLEMENTED",
+      "claim": "Stock subscribers receive valid Image and CameraInfo topics"
+    },
+    {
+      "id": "depth-image-proc",
+      "tier": "ros-integration",
+      "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
+      "command": "not implemented",
+      "status": "NOT_IMPLEMENTED",
+      "claim": "Stock depth_image_proc emits a non-empty organized PointCloud2"
+    },
+    {
+      "id": "rviz-hardware",
+      "tier": "manual-hardware",
+      "environment": "POP 3 Plus, turntable, ROS 2 Jazzy, RViz2",
+      "command": "not implemented",
+      "status": "NOT_IMPLEMENTED",
+      "claim": "Live depth and derived geometry are visually and metrically accepted"
+    }
+  ]
+}

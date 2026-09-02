@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libusb-1.0-0-dev pkg-config jq
+
+      - name: Validate qualification matrix
+        run: |
+          jq -e '
+            .schema_version == 1 and
+            (.statuses == ["PASS", "FAIL", "BLOCKED", "NOT_IMPLEMENTED"]) and
+            ([.cells[].id] | length == (unique | length)) and
+            (.statuses as $statuses |
+              all(.cells[]; .status as $status | $statuses | index($status) != null))
+          ' qualification-matrix.json >/dev/null
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Unit tests
+        run: cargo test --locked --lib
+
+      - name: Offline integration tests
+        run: cargo test --locked --test '*'
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings

@@ -391,6 +391,18 @@ fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     if let Some(error) = frame_error {
         return Err(error);
     }
+    let resolution = depth_stream::get_current_depth_resolution(address, limits)?;
+    let expected_frame_bytes = resolution
+        .frame_bytes()
+        .ok_or_else(|| failure("current depth resolution overflows the platform"))?;
+    if frame_sizes
+        .iter()
+        .any(|(_, decoded)| *decoded as usize != expected_frame_bytes)
+    {
+        return Err(failure(
+            "decoded frame length disagrees with the scanner's current resolution",
+        ));
+    }
     let prefix = prefix
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -402,7 +414,11 @@ fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
         .collect::<Vec<_>>()
         .join(" ");
     println!(
-        "Depth stream smoke passed: bytes={received}, complete_frames={}, sizes_compressed_to_raw={frame_sizes:?}, wire_prefix={prefix}, decoded_prefix={decoded_prefix}",
+        "Depth stream smoke passed: bytes={received}, resolution={}x{}x{}, stride={}, complete_frames={}, sizes_compressed_to_raw={frame_sizes:?}, wire_prefix={prefix}, decoded_prefix={decoded_prefix}",
+        resolution.width,
+        resolution.height,
+        resolution.bytes_per_pixel,
+        resolution.stride_bytes().expect("validated resolution"),
         frame_sizes.len()
     );
     Ok(())

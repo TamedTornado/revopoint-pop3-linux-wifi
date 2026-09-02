@@ -48,8 +48,11 @@ crate rather than copying or translating that routine.
 The scanner's read-only `get_depth_reso` endpoint reported
 `curr-resolution` as `640x800x2` during the same session. Its full response also
 advertised separate depth, calibration, depth-plus-IR, and depth-plus-IR-plus-P
-profiles. We have not yet assigned those components to the decompressed plane or
-claimed a metric pixel interpretation.
+profiles. The client parses that current profile as width 640, height 800, two
+bytes per pixel, and a 1,280-byte stride. Every hardware-decoded frame is
+required to equal the resulting 1,024,000-byte frame size. We have not yet
+assigned the advertised components to the decompressed plane or claimed a
+metric pixel interpretation.
 
 ## Current hardware receipt
 

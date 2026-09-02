@@ -50,7 +50,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "All eight viable depth-orchestration, all 28 viable frame-envelope, and all 16 viable depth-decoder mutants are caught; surviving HTTP mutants and future calibration scopes remain open"
+      "claim": "All 24 viable depth-stream/resolution, all 28 viable frame-envelope, and all 16 viable depth-decoder mutants are caught; surviving HTTP mutants and future calibration scopes remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -66,7 +66,7 @@
       "environment": "POP 3 Plus on reachable LAN",
       "command": "cargo run --release -- --smoke-depth SCANNER_IP",
       "status": "PASS",
-      "claim": "The Rust client recovered and QuickLZ-decompressed four complete bounded envelopes from a 1 MiB real-hardware capture; every decoded size was exactly 1024000 bytes, while plane component semantics remain unclaimed"
+      "claim": "The Rust client recovered and QuickLZ-decompressed four complete bounded envelopes; each decoded size exactly matched the device-reported 640x800x2 profile and 1280-byte stride, while plane component semantics remain unclaimed"
     },
     {
       "id": "metric-depth",

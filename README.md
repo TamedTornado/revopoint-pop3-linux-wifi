@@ -107,7 +107,7 @@ as a hardware diagnostic rather than a file format or visualization tool.
 Example output:
 
 ```text
-Depth stream smoke passed: bytes=1048576, complete_frames=4, sizes_compressed_to_raw=[(..., 1024000)], wire_prefix=0d 0a 0d 0a 44 33 22 11 ..., decoded_prefix=...
+Depth stream smoke passed: bytes=1048576, resolution=640x800x2, stride=1280, complete_frames=4, sizes_compressed_to_raw=[(..., 1024000)], wire_prefix=0d 0a 0d 0a 44 33 22 11 ..., decoded_prefix=...
 ```
 
 Offline network-boundary tests use loopback fixture servers and require no

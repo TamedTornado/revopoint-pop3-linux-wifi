@@ -26,13 +26,35 @@ compares the first word with `0x11223344`, reads the second word as the length,
 and returns eight as the consumed header size. One observed variant also rejects
 non-positive lengths.
 
-No meaning is currently assigned to fields inside the compressed payload. In
-particular, the nearby decoded-frame metadata validator in the SDK binary must
-not be mistaken for the on-wire compressed layout.
+## Compressed payload
+
+The envelope payload is a QuickLZ 1.5 stream with a nine-byte long header. On
+the tested scanner, byte zero is `0x47`; the following little-endian words are
+the compressed and decompressed lengths. The compressed length repeats the
+outer-envelope length exactly.
+
+The Rust decoder checks both length declarations and applies a caller-provided
+output ceiling before decompression. An independent, project-owned QuickLZ
+fixture covers the codec boundary; the repository contains no captured scanner
+frames.
+
+Inspection of the official binary corroborated the algorithm rather than
+supplying an implementation: the depth decoder identifies itself as
+`DecoderDepthQuicklz`, compares QuickLZ's compressed-size result with the bytes
+available, and sizes its destination as width times height times format bits,
+rounded to bytes. The project uses the independently published `quicklz` Rust
+crate rather than copying or translating that routine.
+
+The scanner's read-only `get_depth_reso` endpoint reported
+`curr-resolution` as `640x800x2` during the same session. Its full response also
+advertised separate depth, calibration, depth-plus-IR, and depth-plus-IR-plus-P
+profiles. We have not yet assigned those components to the decompressed plane or
+claimed a metric pixel interpretation.
 
 ## Current hardware receipt
 
-On 2026-09-02, firmware `v3.2.36.20241219` produced four complete envelopes
-inside a bounded 1 MiB capture, with payload sizes 234111, 235358, 238437, and
-233730 bytes. The fifth frame was intentionally cut off by the acquisition
-limit and was not counted.
+On 2026-09-02, firmware `v3.2.36.20241219` repeatedly produced four complete
+envelopes inside a bounded 1 MiB capture. Every complete payload decompressed to
+exactly 1,024,000 bytes; one representative run had compressed sizes 233,528,
+234,171, 238,701, and 238,274 bytes. The fifth frame was intentionally cut off
+by the acquisition limit and was not counted.

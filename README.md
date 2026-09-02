@@ -31,10 +31,9 @@ The read path has been tested against real hardware. The write path:
 It does **not** change firmware or send an upgrade command.
 
 The network acquisition path can configure the scanner's depth output, capture
-an exact byte count from its chunked HTTP media stream, and close the stream on
-success or failure. This is an acquisition milestone only: frame boundaries,
-depth decompression, calibration, and standard application output are not yet
-implemented.
+an exact byte count from its chunked HTTP media stream, recover bounded frame
+envelopes, and decompress their QuickLZ payloads in Rust. Calibration, metric
+pixel interpretation, and standard application output are not yet implemented.
 
 ## Build
 
@@ -101,14 +100,14 @@ cargo run --release -- --smoke-depth 192.168.8.245
 ```
 
 The command captures exactly 1 MiB into a bounded reader, reports complete frame
-envelopes and their compressed sizes, retains only the first 16 bytes for
-display, closes the scanner stream, and exits. It is intended as a hardware
-diagnostic rather than a file format or visualization tool.
+envelopes and their compressed-to-raw sizes, retains short wire and decoded
+prefixes for diagnostics, closes the scanner stream, and exits. It is intended
+as a hardware diagnostic rather than a file format or visualization tool.
 
 Example output:
 
 ```text
-Depth stream smoke passed: bytes=1048576, complete_frames=4, compressed_sizes=[...], prefix=0d 0a 0d 0a 44 33 22 11 ...
+Depth stream smoke passed: bytes=1048576, complete_frames=4, sizes_compressed_to_raw=[(..., 1024000)], wire_prefix=0d 0a 0d 0a 44 33 22 11 ..., decoded_prefix=...
 ```
 
 Offline network-boundary tests use loopback fixture servers and require no

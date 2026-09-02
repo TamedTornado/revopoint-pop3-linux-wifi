@@ -6,6 +6,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::thread;
 use std::time::Duration;
 
+pub mod depth_decode;
 pub mod depth_stream;
 pub mod frame_envelope;
 pub mod http_stream;
@@ -358,29 +359,50 @@ fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     let mut prefix = Vec::with_capacity(16);
     let mut parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
     let mut frame_sizes = Vec::new();
-    let mut frame_error = None;
+    let mut decoded_prefix = Vec::new();
+    let mut frame_error: Option<Box<dyn Error>> = None;
     let received = depth_stream::capture_depth_prefix(address, limits, PREFIX_BYTES, |chunk| {
         let remaining = 16_usize.saturating_sub(prefix.len());
         prefix.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
         if frame_error.is_none() {
             match parser.push(chunk) {
                 Ok(frames) => {
-                    frame_sizes.extend(frames.into_iter().map(|frame| frame.declared_payload_len))
+                    for frame in frames {
+                        match depth_decode::decode_quicklz(&frame, 2 * 1024 * 1024) {
+                            Ok(decoded) => {
+                                if decoded_prefix.is_empty() {
+                                    decoded_prefix.extend_from_slice(
+                                        &decoded.bytes[..decoded.bytes.len().min(64)],
+                                    );
+                                }
+                                frame_sizes.push((decoded.compressed_len, decoded.decompressed_len))
+                            }
+                            Err(error) => {
+                                frame_error = Some(Box::new(error));
+                                break;
+                            }
+                        }
+                    }
                 }
-                Err(error) => frame_error = Some(error),
+                Err(error) => frame_error = Some(Box::new(error)),
             }
         }
     })?;
     if let Some(error) = frame_error {
-        return Err(Box::new(error));
+        return Err(error);
     }
     let prefix = prefix
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<Vec<_>>()
         .join(" ");
+    let decoded_prefix = decoded_prefix
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ");
     println!(
-        "Depth stream smoke passed: bytes={received}, complete_frames={}, compressed_sizes={frame_sizes:?}, prefix={prefix}",
+        "Depth stream smoke passed: bytes={received}, complete_frames={}, sizes_compressed_to_raw={frame_sizes:?}, wire_prefix={prefix}, decoded_prefix={decoded_prefix}",
         frame_sizes.len()
     );
     Ok(())

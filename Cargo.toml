@@ -7,5 +7,6 @@ description = "Provision Revopoint POP 3 Wi-Fi credentials over USB on Linux"
 repository = "https://github.com/TamedTornado/revopoint-pop3-linux-wifi"
 
 [dependencies]
+quicklz = "=0.3.1"
 rpassword = "7.3.1"
 rusb = "0.9.4"

@@ -26,7 +26,7 @@
       "environment": "Ubuntu 24.04, no scanner",
       "command": "cargo test --test '*'",
       "status": "PASS",
-      "claim": "The built CLI and fragmented local HTTP boundaries cover bounded acquisition, timeout, truncation, response variants, and stream cleanup"
+      "claim": "The built CLI and fragmented local HTTP boundaries cover bounded acquisition, timeout, truncation, response variants, stream cleanup, envelope parsing, and bounded QuickLZ decoding"
     },
     {
       "id": "quality",
@@ -48,9 +48,9 @@
       "id": "mutation",
       "tier": "mutation",
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
-      "command": "cargo mutants -f src/depth_stream.rs -j 1 --timeout 5",
+      "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "All eight viable depth-orchestration mutants and all 28 viable frame-envelope mutants are caught; surviving HTTP mutants and future decoder and calibration scopes remain open"
+      "claim": "All eight viable depth-orchestration, all 28 viable frame-envelope, and all 16 viable depth-decoder mutants are caught; surviving HTTP mutants and future calibration scopes remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -66,7 +66,7 @@
       "environment": "POP 3 Plus on reachable LAN",
       "command": "cargo run --release -- --smoke-depth SCANNER_IP",
       "status": "PASS",
-      "claim": "The Rust client recovered four complete bounded envelopes and compressed sizes from a 1 MiB real-hardware capture; dimensions and inner metadata remain unclaimed"
+      "claim": "The Rust client recovered and QuickLZ-decompressed four complete bounded envelopes from a 1 MiB real-hardware capture; every decoded size was exactly 1024000 bytes, while plane component semantics remain unclaimed"
     },
     {
       "id": "metric-depth",

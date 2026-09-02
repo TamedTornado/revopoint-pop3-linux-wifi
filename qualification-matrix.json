@@ -51,7 +51,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "All 40 viable depth-stream/profile/scale, all 28 viable frame-envelope, and all 38 viable depth-decoder/Z16 mutants are caught; surviving HTTP mutants and future calibration scopes remain open"
+      "claim": "All 40 viable depth-stream/profile/scale, all 28 viable frame-envelope, all 38 viable depth-decoder/Z16, and all 53 viable calibration mutants are caught; surviving HTTP mutants remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -75,7 +75,7 @@
       "environment": "POP 3 Plus and measured physical targets",
       "command": "cargo run --release -- --smoke-depth SCANNER_IP",
       "status": "PARTIAL",
-      "claim": "The device property reports 0.1 mm per Z16 unit and four live frames have plausible nonzero statistics; invalid semantics and camera intrinsics remain unverified"
+      "claim": "The device reports 0.1 mm per Z16 unit; its 1280x800 depth projection record parses and scales to the selected 640x400 stream as the public SDK specifies; physical-target, distortion, rectification, and invalid-value qualification remain open"
     },
     {
       "id": "ros-contract",

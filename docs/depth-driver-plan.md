@@ -81,6 +81,12 @@ convention, and rectification state. Validate scale and planar error against
 measured physical targets. The output of this phase is a calibrated depth
 frame, not merely decoded integers.
 
+In progress: the device depth-unit divisor and read-only depth intrinsics are
+parsed, validated, scaled to the selected 640x400 stream using the public SDK's
+documented projection transform, exercised against hardware, and
+mutation-clean. Distortion/rectification semantics, optical-frame publication,
+and physical-target qualification remain open.
+
 ### 5a. Mutation-test deterministic contracts ([#9](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/9))
 
 Run a pinned Rust mutation tool over HTTP framing, frame parsing,

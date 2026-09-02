@@ -34,7 +34,10 @@ The network acquisition path can configure the scanner's depth output, capture
 an exact byte count from its chunked HTTP media stream, recover bounded frame
 envelopes, decompress their QuickLZ payloads in Rust, and validate owned
 640x400 little-endian Z16 planes. The device reports a depth unit of 0.1 mm.
-Camera intrinsics and standard application output are not yet implemented.
+The client also downloads and validates the scanner's depth projection matrix,
+then scales its focal lengths and principal point to the selected stream size
+using the same resolution transform documented by Revopoint's public SDK.
+Standard application output is not yet implemented.
 
 ## Build
 
@@ -108,7 +111,7 @@ as a hardware diagnostic rather than a file format or visualization tool.
 Example output:
 
 ```text
-Depth stream smoke passed: bytes=1048576, resolution=640x400x2, stride=1280, millimeters_per_unit=0.1, complete_frames=4, frame_receipts=[...]
+Depth stream smoke passed: bytes=1048576, resolution=640x400x2, stride=1280, millimeters_per_unit=0.1, calibration=1280x800, intrinsics=(fx=873.7233,fy=873.7233,cx=128.598,cy=201.2753), complete_frames=4, frame_receipts=[...]
 ```
 
 Offline network-boundary tests use loopback fixture servers and require no

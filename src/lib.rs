@@ -6,6 +6,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::thread;
 use std::time::Duration;
 
+pub mod calibration;
 pub mod depth_decode;
 pub mod depth_stream;
 pub mod frame_envelope;
@@ -398,6 +399,8 @@ fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
         ));
     }
     let millimeters_per_unit = depth_stream::get_depth_scale_mm(address, limits)?;
+    let depth_intrinsics = calibration::get_depth_intrinsics(address, limits)?;
+    let scaled_intrinsics = depth_intrinsics.for_resolution(resolution.width, resolution.height)?;
     let mut frame_receipts = Vec::with_capacity(decoded_frames.len());
     for decoded in decoded_frames {
         let compressed_len = decoded.compressed_len;
@@ -424,11 +427,17 @@ fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
         .collect::<Vec<_>>()
         .join(" ");
     println!(
-        "Depth stream smoke passed: bytes={received}, resolution={}x{}x{}, stride={}, millimeters_per_unit={millimeters_per_unit}, complete_frames={}, frame_receipts=(compressed_bytes,raw_bytes,nonzero,min_raw,max_raw,mean_nonzero_mm){frame_receipts:?}, wire_prefix={prefix}, decoded_prefix={decoded_prefix}",
+        "Depth stream smoke passed: bytes={received}, resolution={}x{}x{}, stride={}, millimeters_per_unit={millimeters_per_unit}, calibration={}x{}, intrinsics=(fx={},fy={},cx={},cy={}), complete_frames={}, frame_receipts=(compressed_bytes,raw_bytes,nonzero,min_raw,max_raw,mean_nonzero_mm){frame_receipts:?}, wire_prefix={prefix}, decoded_prefix={decoded_prefix}",
         resolution.width,
         resolution.height,
         resolution.bytes_per_pixel,
         resolution.stride_bytes().expect("validated resolution"),
+        depth_intrinsics.calibration_width,
+        depth_intrinsics.calibration_height,
+        scaled_intrinsics.fx,
+        scaled_intrinsics.fy,
+        scaled_intrinsics.cx,
+        scaled_intrinsics.cy,
         frame_receipts.len()
     );
     Ok(())

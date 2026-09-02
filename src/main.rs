@@ -3,18 +3,20 @@ use std::env;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self, Write};
+use std::thread;
 use std::time::Duration;
 
 const VID: u16 = 0x2207;
 const PID: u16 = 0x110c;
 const INTERFACE: u8 = 0;
-const TIMEOUT: Duration = Duration::from_secs(1);
+const TIMEOUT: Duration = Duration::from_secs(5);
 const START_FINISH: u16 = 0x0100;
 const DATA: u16 = 0x0200;
 const EXECUTE: u16 = 0x0700;
 const EXTENSION_UNIT_AND_INTERFACE: u16 = 0x0400;
 const REPORT_SIZE: usize = 60;
 const CONFIG_PATH: &str = "/data/wpa_supplicant.config";
+const AP_CONFIG_PATH: &str = "/data/hostapd.conf";
 
 #[derive(Debug)]
 struct MessageError(String);
@@ -128,8 +130,15 @@ impl Scanner {
     }
 
     fn sync(&self) -> Result<(), Box<dyn Error>> {
+        self.execute("sync")
+    }
+
+    fn execute(&self, command: &str) -> Result<(), Box<dyn Error>> {
+        if command.len() + 1 > REPORT_SIZE {
+            return Err(failure("scanner command is too long"));
+        }
         let mut report = [0_u8; REPORT_SIZE];
-        report[..5].copy_from_slice(b"sync\0");
+        report[..command.len()].copy_from_slice(command.as_bytes());
         self.write_report(EXECUTE, &report)
     }
 
@@ -194,21 +203,38 @@ fn escape_wpa(value: &str) -> String {
 
 fn make_config(ssid: &str, password: &str) -> String {
     format!(
-        "#pop2_enable=enable\n\\
-         ctrl_interface=/var/run/wpa_supplicant\n\\
-         ap_scan=1\n\\
-         update_config=1\n\n\\
-         network={{\n\\
-         ssid=\"{}\"\n\\
-         psk=\"{}\"\n\\
-         key_mgmt=WPA-PSK\n\\
-         pairwise=CCMP TKIP\n\\
-         group=CCMP TKIP\n\\
-         proto=WPA2\n\\
-         }}\n",
+        concat!(
+            "#pop2_enable=enable\n",
+            "ctrl_interface=/var/run/wpa_supplicant\n",
+            "ap_scan=1\n",
+            "update_config=1\n\n",
+            "network={{\n",
+            "ssid=\"{}\"\n",
+            "psk=\"{}\"\n",
+            "key_mgmt=WPA-PSK\n",
+            "pairwise=CCMP TKIP\n",
+            "group=CCMP TKIP\n",
+            "proto=WPA2\n",
+            "}}\n",
+        ),
         escape_wpa(ssid),
         escape_wpa(password)
     )
+}
+
+fn disable_access_point(config: &str) -> Result<String, Box<dyn Error>> {
+    const ENABLED: &str = "#pop2_enable=enable";
+    const DISABLED: &str = "#pop2_enable=disable";
+
+    if config.lines().any(|line| line == DISABLED) {
+        return Ok(config.to_owned());
+    }
+    if !config.lines().any(|line| line == ENABLED) {
+        return Err(failure(
+            "access-point configuration has no recognized mode marker",
+        ));
+    }
+    Ok(config.replacen(ENABLED, DISABLED, 1))
 }
 
 fn prompt(prompt: &str) -> Result<String, Box<dyn Error>> {
@@ -219,16 +245,52 @@ fn prompt(prompt: &str) -> Result<String, Box<dyn Error>> {
     Ok(value.trim_end_matches(['\r', '\n']).to_owned())
 }
 
-fn run(write: bool) -> Result<(), Box<dyn Error>> {
+fn run(write: bool, diagnose: bool) -> Result<(), Box<dyn Error>> {
     let scanner = Scanner::open()?;
+    if diagnose {
+        scanner.execute("killall wpa_supplicant 2>/dev/null; true")?;
+        scanner.execute("rm -f /var/run/wpa_supplicant/wlan0")?;
+        scanner.execute("ln -sf /data/wpa_supplicant.config /tmp/w")?;
+        scanner.execute("wpa_supplicant -B -iwlan0 -c/tmp/w >/data/ws 2>&1")?;
+        thread::sleep(Duration::from_secs(8));
+        scanner.execute("udhcpc -i wlan0 -n -q >/data/dhcp 2>&1 &")?;
+        thread::sleep(Duration::from_secs(5));
+        scanner.execute("wpa_cli status >/data/wifi-status.txt 2>&1")?;
+        scanner.execute("ip addr show wlan0 >/data/wifi-ip.txt 2>&1")?;
+        scanner.execute("ps | grep '[w]pa' >/data/wifi-process.txt 2>&1")?;
+        for (label, path) in [
+            ("wpa_supplicant status", "/data/wifi-status.txt"),
+            ("wpa_supplicant startup", "/data/ws"),
+            ("DHCP client", "/data/dhcp"),
+            ("wlan0 address", "/data/wifi-ip.txt"),
+            ("Wi-Fi processes", "/data/wifi-process.txt"),
+        ] {
+            let output = scanner.read_file(path)?;
+            println!("--- {label} ---");
+            print!("{}", String::from_utf8_lossy(&output));
+            if !output.ends_with(b"\n") {
+                println!();
+            }
+        }
+        return Ok(());
+    }
     let current_bytes = scanner.read_file(CONFIG_PATH)?;
     let current = std::str::from_utf8(&current_bytes)?;
+    let access_point_bytes = scanner.read_file(AP_CONFIG_PATH)?;
+    let access_point = std::str::from_utf8(&access_point_bytes)?;
     let current_ssid = config_value(current, "ssid").unwrap_or("");
     let password_is_set = config_value(current, "psk").is_some_and(|value| !value.is_empty());
+    let access_point_is_enabled = access_point
+        .lines()
+        .any(|line| line == "#pop2_enable=enable");
     println!("Current client SSID: \"{current_ssid}\"");
     println!(
         "Current password configured: {}",
         if password_is_set { "yes" } else { "no" }
+    );
+    println!(
+        "Scanner access point enabled: {}",
+        if access_point_is_enabled { "yes" } else { "no" }
     );
 
     if !write {
@@ -255,6 +317,7 @@ fn run(write: bool) -> Result<(), Box<dyn Error>> {
     }
 
     let next = make_config(&ssid, &password);
+    let next_access_point = disable_access_point(access_point)?;
     scanner.write_file(CONFIG_PATH, next.as_bytes())?;
     let verified = scanner.read_file(CONFIG_PATH)?;
     if verified != next.as_bytes() {
@@ -262,10 +325,18 @@ fn run(write: bool) -> Result<(), Box<dyn Error>> {
             "read-back verification failed; do not power-cycle the scanner",
         ));
     }
+    scanner.write_file(AP_CONFIG_PATH, next_access_point.as_bytes())?;
+    let verified_access_point = scanner.read_file(AP_CONFIG_PATH)?;
+    if verified_access_point != next_access_point.as_bytes() {
+        return Err(failure(
+            "access-point read-back verification failed; do not power-cycle the scanner",
+        ));
+    }
     scanner.sync()?;
     println!(
-        "Provisioning verified and synced. Disconnect USB data and power-cycle the scanner \
-         from a power adapter or power bank to enter Wi-Fi mode."
+        "Client credentials and AP-disable configuration verified and synced. Disconnect USB \
+         data, power-cycle from a power adapter or power bank, then verify that the scanner \
+         joins the LAN."
     );
     Ok(())
 }
@@ -275,16 +346,17 @@ fn main() {
     let program = arguments
         .next()
         .unwrap_or_else(|| "revopoint-pop3-wifi".to_owned());
-    let write = match (arguments.next().as_deref(), arguments.next()) {
-        (None, None) => false,
-        (Some("--write"), None) => true,
+    let (write, diagnose) = match (arguments.next().as_deref(), arguments.next()) {
+        (None, None) => (false, false),
+        (Some("--write"), None) => (true, false),
+        (Some("--diagnose"), None) => (false, true),
         _ => {
-            eprintln!("usage: {program} [--write]");
+            eprintln!("usage: {program} [--write | --diagnose]");
             std::process::exit(2);
         }
     };
 
-    if let Err(error) = run(write) {
+    if let Err(error) = run(write, diagnose) {
         eprintln!("Error: {error}");
         std::process::exit(1);
     }
@@ -309,8 +381,37 @@ mod tests {
     #[test]
     fn generated_config_contains_wpa2_credentials() {
         let config = make_config("example", "password123");
-        assert!(config.contains("ssid=\"example\""));
-        assert!(config.contains("psk=\"password123\""));
-        assert!(config.contains("proto=WPA2"));
+        assert_eq!(
+            config,
+            concat!(
+                "#pop2_enable=enable\n",
+                "ctrl_interface=/var/run/wpa_supplicant\n",
+                "ap_scan=1\n",
+                "update_config=1\n\n",
+                "network={\n",
+                "ssid=\"example\"\n",
+                "psk=\"password123\"\n",
+                "key_mgmt=WPA-PSK\n",
+                "pairwise=CCMP TKIP\n",
+                "group=CCMP TKIP\n",
+                "proto=WPA2\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn disables_access_point_without_rebuilding_vendor_configuration() {
+        let config = "#pop2_enable=enable\ninterface=wlan0\nssid=POP3Plus\n";
+        assert_eq!(
+            disable_access_point(config).unwrap(),
+            "#pop2_enable=disable\ninterface=wlan0\nssid=POP3Plus\n"
+        );
+    }
+
+    #[test]
+    fn accepts_an_already_disabled_access_point() {
+        let config = "#pop2_enable=disable\ninterface=wlan0\n";
+        assert_eq!(disable_access_point(config).unwrap(), config);
     }
 }

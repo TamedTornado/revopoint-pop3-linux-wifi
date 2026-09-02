@@ -22,8 +22,10 @@ The read path has been tested against real hardware. The write path:
 2. hides password input and never puts it in process arguments;
 3. validates WPA2 credential lengths;
 4. writes the scanner's client configuration;
-5. reads it back and requires a byte-for-byte match; and
-6. asks the scanner to sync the filesystem.
+5. disables the scanner's own access point while preserving its existing AP
+   configuration;
+6. reads both files back and requires byte-for-byte matches; and
+7. asks the scanner to sync the filesystem.
 
 It does **not** change firmware or send an upgrade command.
 
@@ -75,7 +77,8 @@ cargo run --release -- --write
 ```
 
 The utility asks for the SSID, requests the password with terminal echo disabled,
-and requires typing `WRITE` before touching the scanner.
+and requires typing `WRITE` before touching the scanner. Client mode requires
+both writing the client credentials and disabling the scanner's own access point.
 
 After a successful write, disconnect the USB data cable and power-cycle the
 scanner from a power adapter or power bank. When powered through a computer's USB
@@ -103,9 +106,10 @@ file, and one filesystem-sync command.
 
 ## Recovery
 
-Before writing, the utility displays the existing SSID. After writing, it verifies
-the new file before syncing. If verification fails, do not power-cycle the
-scanner; rerun the utility or restore the previous network details.
+Before writing, the utility displays the existing SSID and access-point state.
+After writing, it verifies both configuration files before syncing. If
+verification fails, do not power-cycle the scanner; rerun the utility or restore
+the previous network details.
 
 ## License
 

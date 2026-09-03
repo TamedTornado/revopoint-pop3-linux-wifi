@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 pub mod calibration;
+pub mod capture_archive;
 pub mod depth_decode;
 pub mod depth_stream;
 pub mod frame_envelope;
@@ -769,6 +770,54 @@ fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
             "paired RGB and depth frames have no spatially overlapping valid points",
         ));
     }
+    let archive_root = format!("{output_prefix}-archive");
+    let archive_name = format!("frame-{:010}", depth.device_timestamp_ms);
+    let archive_directory = capture_archive::write_frame_archive(
+        std::path::Path::new(&archive_root),
+        &archive_name,
+        capture_archive::ArchiveFrame {
+            manifest: capture_archive::ArchiveManifest {
+                schema_version: 1,
+                depth_timestamp_ms: depth.device_timestamp_ms,
+                rgb_timestamp_ms,
+                timestamp_delta_ms: selected.timestamps.absolute_delta_ms,
+                depth: capture_archive::DepthRecord {
+                    width: depth.depth.width,
+                    height: depth.depth.height,
+                    millimeters_per_unit: depth.depth.millimeters_per_unit,
+                    intrinsics: [
+                        depth_intrinsics.fx,
+                        depth_intrinsics.fy,
+                        depth_intrinsics.cx,
+                        depth_intrinsics.cy,
+                    ],
+                    raw_file: "depth.z16le".to_owned(),
+                    pgm_file: "depth-mm.pgm".to_owned(),
+                },
+                rgb: capture_archive::RgbRecord {
+                    width: rgb_image.width,
+                    height: rgb_image.height,
+                    calibration_width: calibration.intrinsics.calibration_width,
+                    calibration_height: calibration.intrinsics.calibration_height,
+                    intrinsics: [
+                        calibration.intrinsics.fx,
+                        calibration.intrinsics.fy,
+                        calibration.intrinsics.cx,
+                        calibration.intrinsics.cy,
+                    ],
+                    distortion: calibration.distortion.coefficients,
+                    jpeg_file: "rgb.jpg".to_owned(),
+                },
+                depth_to_rgb: capture_archive::ExtrinsicsRecord {
+                    rotation: calibration.left_to_rgb.rotation,
+                    translation_mm: calibration.left_to_rgb.translation_mm,
+                },
+                colored_ply_file: "colored.ply".to_owned(),
+            },
+            depth_raw: &depth.depth.bytes,
+            rgb_jpeg: &rgb_payload[..rgb.encoded_len],
+        },
+    )?;
     std::fs::write(&depth_path, stereo_depth::encode_z16_pgm(&depth.depth)?)?;
     std::fs::write(&rgb_path, &rgb_payload[..rgb.encoded_len])?;
     std::fs::write(
@@ -776,7 +825,7 @@ fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         rgb_registration::encode_binary_ply(&colored_points),
     )?;
     println!(
-        "Concurrent RGB-D smoke passed: depth_bytes={depth_received}, rgb_bytes={rgb_received}, depth_resolution={}x{}, rgb_resolution={}x{}, depth_timestamp_ms={}, rgb_timestamp_ms={}, timestamp_delta_ms={}, rgb_calibration={}x{}, colored_points={}, depth={depth_path}, rgb={rgb_path}, colored={colored_path}",
+        "Concurrent RGB-D smoke passed: depth_bytes={depth_received}, rgb_bytes={rgb_received}, depth_resolution={}x{}, rgb_resolution={}x{}, depth_timestamp_ms={}, rgb_timestamp_ms={}, timestamp_delta_ms={}, rgb_calibration={}x{}, colored_points={}, depth={depth_path}, rgb={rgb_path}, colored={colored_path}, archive={}",
         depth.depth.width,
         depth.depth.height,
         rgb.width,
@@ -787,6 +836,7 @@ fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         calibration.intrinsics.calibration_width,
         calibration.intrinsics.calibration_height,
         colored_points.len(),
+        archive_directory.display(),
     );
     Ok(())
 }
@@ -813,6 +863,13 @@ fn inspect_rgb_calibration(ip: &str) -> Result<(), Box<dyn Error>> {
         "Left-to-RGB translation (mm): {:?}",
         calibration.left_to_rgb.translation_mm
     );
+    Ok(())
+}
+
+fn replay_archive(directory: &str, output: &str) -> Result<(), Box<dyn Error>> {
+    let ply = capture_archive::replay_colored_ply(std::path::Path::new(directory))?;
+    std::fs::write(output, ply)?;
+    println!("Replayed calibrated RGB-D archive: input={directory}, colored={output}");
     Ok(())
 }
 
@@ -914,6 +971,15 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 }
             };
         }
+        [argument, directory, output] if argument == "--replay-archive" => {
+            return match replay_archive(directory, output) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
         [argument, ip] if argument == "--inspect-rgb-calibration" => {
             return match inspect_rgb_calibration(ip) {
                 Ok(()) => 0,
@@ -933,7 +999,7 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             }
         }
         [argument] if argument == "--help" || argument == "-h" => {
-            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --replay-archive DIRECTORY OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
@@ -944,6 +1010,9 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 "  --smoke-rgbd IP OUTPUT_PREFIX  Save concurrently acquired depth and RGB images"
             );
             println!(
+                "  --replay-archive DIRECTORY OUTPUT_PLY  Rebuild a colored cloud without the scanner"
+            );
+            println!(
                 "  --inspect-rgb-calibration IP  Print RGB intrinsics and left-to-RGB transform"
             );
             println!("  --smoke-pair IP OUTPUT_PREFIX  Save left/right infrared PGM images");
@@ -952,7 +1021,7 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             return 0;
         }
         _ => {
-            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --replay-archive DIRECTORY OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             return 2;
         }
     };

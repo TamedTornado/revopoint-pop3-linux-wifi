@@ -16,6 +16,7 @@ fn help_is_available_without_scanner_hardware() {
     assert!(stdout.contains("--smoke-depth"));
     assert!(stdout.contains("--smoke-rgb"));
     assert!(stdout.contains("--smoke-rgbd"));
+    assert!(stdout.contains("--replay-archive"));
     assert!(stdout.contains("--inspect-rgb-calibration"));
     assert!(!stdout.contains("--measure-plane"));
     assert!(stdout.contains("--ros2-depth"));

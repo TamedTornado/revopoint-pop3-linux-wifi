@@ -170,8 +170,10 @@ pair on their common device clock, with RGB required to follow depth within 50
 ms. The paired smoke now also follows the public SDK's depth-to-RGB projection,
 samples JPEG color, and writes a standard colored PLY that stock CloudCompare
 loads as a 163,174-point cloud. Pixel-level alignment remains unqualified on the
-uniform wall. Archive format, turntable angle metadata, masking, and dataset
-adapters remain open.
+uniform wall. A versioned, atomically published archive now retains exact Z16,
+viewable depth PGM, JPEG, colored PLY, timestamps, and calibration. An offline
+command reproduced the archived PLY byte-for-byte without contacting the
+scanner. Turntable angle metadata, masking, and dataset adapters remain open.
 
 ## Red-green workflow
 

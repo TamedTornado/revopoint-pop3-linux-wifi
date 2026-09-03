@@ -126,6 +126,14 @@
       "claim": "Projection convention, timestamp pairing, JPEG decoding, color sampling, PLY serialization, and application interoperability pass. Pixel-level color alignment remains unqualified because the current wall target has no sufficiently distinct corresponding depth and color edges"
     },
     {
+      "id": "offline-rgbd-archive-replay",
+      "tier": "application-integration",
+      "environment": "Scanner disconnected after one live capture",
+      "command": "cargo run --release -- --replay-archive FRAME_DIRECTORY OUTPUT_PLY",
+      "status": "PASS",
+      "claim": "The live command atomically published exact Z16, a viewable millimetre PGM, RGB JPEG, colored PLY, and a versioned calibration/timestamp manifest. Offline replay regenerated a byte-identical 163175-point PLY, which stock CloudCompare loaded and processed without the scanner"
+    },
+    {
       "id": "metric-depth",
       "tier": "hardware",
       "environment": "POP 3 Plus and measured physical targets",

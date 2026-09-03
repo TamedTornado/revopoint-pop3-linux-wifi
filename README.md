@@ -172,6 +172,22 @@ SDK's depth-to-RGB transform convention. Registration accuracy still needs a
 target with recognizable depth/color edges; the current wall proves the data
 path and file interoperability, not pixel alignment.
 
+The same command atomically publishes a replayable frame under
+`/tmp/pop3-archive/frame-TIMESTAMP/`. Each frame contains the exact little-endian
+Z16 plane, a viewable millimetre PGM, the original JPEG, the colored PLY, and a
+versioned JSON manifest with both timestamps and all calibration needed for
+registration. Rebuild the colored cloud with the scanner disconnected:
+
+```sh
+cargo run --release -- --replay-archive \
+  /tmp/pop3-archive/frame-0025931490 /tmp/pop3-replayed.ply
+```
+
+Frame directories are renamed into place only after every artifact and the
+manifest have been written. Unsafe path components, inconsistent timestamps,
+unexpected filenames, malformed images, and attempts to overwrite a frame are
+rejected.
+
 The disparity image is currently a diagnostic, not qualified metric depth. It
 uses a bounded 0–160 pixel search, a 15×15 SAD support window, a provisional 1%
 best-versus-runner-up cost margin, and a one-pixel left/right consistency check.

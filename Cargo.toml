@@ -11,6 +11,7 @@ default = []
 ros2 = ["dep:rclrs"]
 
 [dependencies]
+jpeg-decoder = { version = "=0.3.2", default-features = false }
 quicklz = "=0.3.1"
 rclrs = { version = "=0.7.0", optional = true }
 rpassword = "7.3.1"

@@ -54,8 +54,7 @@ The smoke command now collects eight frames from each stream, finds the closest
 pair for which RGB follows depth within an explicit 50 ms window, and handles
 `u32` timestamp wraparound. The first one-frame attempt correctly rejected a
 171 ms startup-skewed pair; the multi-frame run then selected a 15 ms pair from
-5,035,118 depth transport bytes and 505,455 RGB transport bytes. Spatial
-registration remains separate work.
+5,035,118 depth transport bytes and 505,455 RGB transport bytes.
 
 Three read-only calibration files were also recovered through the existing
 download command:
@@ -65,6 +64,18 @@ download command:
 - `LC_RT.bin`: nine little-endian `f32` rotation values followed by a
   three-element millimetre translation from the left depth camera to RGB.
 
-The Rust parser validates all three layouts and the live POP 3 Plus files. The
-exact registration/resampling policy and paired-frame acceptance tolerance
-remain to be qualified.
+The Rust parser validates all three layouts and the live POP 3 Plus files.
+Revopoint's public SDK processing header establishes its point-color projection
+convention: add the three translation values to a point in the left depth
+camera frame, multiply by the stored 3×3 rotation in row-major order, then
+project with the RGB pinhole matrix. That published point generator does not
+apply the separately reported distortion coefficients during this operation.
+The clean-room Rust implementation follows that convention and truncates the
+projected coordinates for nearest-pixel RGB sampling.
+
+A corrected live run selected another 15 ms pair, decoded the JPEG without a
+vendor codec, registered 163,174 valid depth samples to RGB, and wrote a 2.4 MB
+binary little-endian colored PLY. Ubuntu's stock CloudCompare 2.11.3 loaded the
+file as one cloud with exactly 163,174 points and successfully computed normals.
+The wall target is too visually uniform to qualify pixel-level color alignment,
+so a target with recognizable depth and color edges remains required.

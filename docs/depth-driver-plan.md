@@ -167,7 +167,10 @@ PGM and RGB JPEG files. The path also downloads and validates RGB intrinsics,
 five distortion coefficients, and the left-depth-camera-to-RGB transform. The
 driver now gathers eight candidates from each stream and selects the closest
 pair on their common device clock, with RGB required to follow depth within 50
-ms. Registration, archive format, turntable angle metadata, masking, and dataset
+ms. The paired smoke now also follows the public SDK's depth-to-RGB projection,
+samples JPEG color, and writes a standard colored PLY that stock CloudCompare
+loads as a 163,174-point cloud. Pixel-level alignment remains unqualified on the
+uniform wall. Archive format, turntable angle metadata, masking, and dataset
 adapters remain open.
 
 ## Red-green workflow

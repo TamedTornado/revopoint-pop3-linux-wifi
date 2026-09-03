@@ -14,6 +14,7 @@ pub mod http_stream;
 pub mod pair_decode;
 pub mod rgb_calibration;
 pub mod rgb_decode;
+pub mod rgb_registration;
 pub mod rgb_stream;
 pub mod rgbd_pair;
 pub mod rgbd_stream;
@@ -717,6 +718,8 @@ fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         return Err(failure(format!("RGB frame: {error}")));
     }
     let scale = depth_stream::get_depth_scale_mm(address, limits)?;
+    let depth_intrinsics =
+        calibration::get_depth_intrinsics(address, limits)?.for_resolution(640, 400)?;
     let calibration = rgb_calibration::get_rgb_calibration(address, limits)?;
     let mut depth_frames = depth_envelopes
         .iter()
@@ -757,10 +760,23 @@ fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
 
     let depth_path = format!("{output_prefix}-depth-mm.pgm");
     let rgb_path = format!("{output_prefix}-rgb.jpg");
+    let colored_path = format!("{output_prefix}-colored.ply");
+    let rgb_image = rgb_registration::decode_jpeg_rgb(&rgb_payload[..rgb.encoded_len])?;
+    let colored_points =
+        rgb_registration::colorize_depth(&depth.depth, depth_intrinsics, &rgb_image, calibration)?;
+    if colored_points.is_empty() {
+        return Err(failure(
+            "paired RGB and depth frames have no spatially overlapping valid points",
+        ));
+    }
     std::fs::write(&depth_path, stereo_depth::encode_z16_pgm(&depth.depth)?)?;
     std::fs::write(&rgb_path, &rgb_payload[..rgb.encoded_len])?;
+    std::fs::write(
+        &colored_path,
+        rgb_registration::encode_binary_ply(&colored_points),
+    )?;
     println!(
-        "Concurrent RGB-D smoke passed: depth_bytes={depth_received}, rgb_bytes={rgb_received}, depth_resolution={}x{}, rgb_resolution={}x{}, depth_timestamp_ms={}, rgb_timestamp_ms={}, timestamp_delta_ms={}, rgb_calibration={}x{}, depth={depth_path}, rgb={rgb_path}",
+        "Concurrent RGB-D smoke passed: depth_bytes={depth_received}, rgb_bytes={rgb_received}, depth_resolution={}x{}, rgb_resolution={}x{}, depth_timestamp_ms={}, rgb_timestamp_ms={}, timestamp_delta_ms={}, rgb_calibration={}x{}, colored_points={}, depth={depth_path}, rgb={rgb_path}, colored={colored_path}",
         depth.depth.width,
         depth.depth.height,
         rgb.width,
@@ -770,6 +786,7 @@ fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         selected.timestamps.absolute_delta_ms,
         calibration.intrinsics.calibration_width,
         calibration.intrinsics.calibration_height,
+        colored_points.len(),
     );
     Ok(())
 }

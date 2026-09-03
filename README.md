@@ -161,12 +161,16 @@ cargo run --release -- --smoke-rgbd 192.168.8.245 /tmp/pop3
 ```
 
 This holds both media connections open until each parser has reached a complete
-application-frame boundary, then writes `/tmp/pop3-depth-mm.pgm` and
-`/tmp/pop3-rgb.jpg`. Both files open in ordinary Linux image viewers. The
-command extracts both device-clock timestamps and accepts the frames only when
+application-frame boundary, then writes `/tmp/pop3-depth-mm.pgm`,
+`/tmp/pop3-rgb.jpg`, and `/tmp/pop3-colored.ply`. The images open in ordinary
+Linux image viewers, while the binary little-endian colored point cloud opens
+directly in CloudCompare. The command extracts both device-clock timestamps and
+accepts the frames only when
 RGB follows depth by no more than 50 ms. It collects eight candidates from each
-stream and selects the closest valid pair. It does **not** yet spatially
-register the images.
+stream and selects the closest valid pair. Color projection follows the public
+SDK's depth-to-RGB transform convention. Registration accuracy still needs a
+target with recognizable depth/color edges; the current wall proves the data
+path and file interoperability, not pixel alignment.
 
 The disparity image is currently a diagnostic, not qualified metric depth. It
 uses a bounded 0–160 pixel search, a 15×15 SAD support window, a provisional 1%

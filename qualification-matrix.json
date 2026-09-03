@@ -14,6 +14,7 @@
     "experimental_rviz_depth_image_pass": true,
     "experimental_rviz_cloud_display_pass": true,
     "hardware_depth_z16_pass": true,
+    "hardware_rgb_jpeg_pass": true,
     "ros_depth_camera_pass": true,
     "rviz_live_acceptance_pass": false
   },
@@ -56,7 +57,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the new PAIR decoder, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, normalized global-shift diagnostic, map/Q parser/full reprojection, metric Z16/PGM, and robust depth-statistics focused sets catch all viable mutants exercised. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
+      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the PAIR and RGB/JPEG decoders, RGB controls, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, normalized global-shift diagnostic, map/Q parser/full reprojection, metric Z16/PGM, and robust depth-statistics focused sets catch all viable mutants exercised. The RGB set caught 40 mutants with two timeout-killed and two unviable, with none missed. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -81,6 +82,14 @@
       "command": "cargo run --release -- --smoke-depth SCANNER_IP OUTPUT_PREFIX",
       "status": "PASS",
       "claim": "Selector 3 yielded a 1024000-byte Z16Y8Y8 frame: explicit 640x400 little-endian Z16 plus two Y8 planes. A live wall run had 64.0% nonzero depth, 167.8 mm median, 1.5 mm MAD, and 165.0-170.7 mm p10-p90 at the queried 0.1 mm scale"
+    },
+    {
+      "id": "hardware-rgb",
+      "tier": "hardware",
+      "environment": "POP 3 Plus on reachable LAN",
+      "command": "cargo run --release -- --smoke-rgb SCANNER_IP OUTPUT_PREFIX",
+      "status": "PASS",
+      "claim": "The bounded Rust path recovered a complete camera-50 RGB envelope, validated a baseline 1280x800 JPEG, removed the observed four-byte post-EOI transport trailer, and wrote a recognizable ordinary JPEG of the physical wall target"
     },
     {
       "id": "metric-depth",

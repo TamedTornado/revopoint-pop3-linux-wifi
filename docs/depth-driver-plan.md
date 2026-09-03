@@ -147,21 +147,22 @@ image and derived cloud in RViz2, and record automated graph evidence plus a
 real-hardware acceptance receipt. Exercise turntable motion, scale,
 orientation, shutdown, and restart.
 
-Corrected status: the ROS graph and RViz plumbing worked, but its live input was
-not depth. The V-shaped cloud was a useful falsification signal, not an
-acceptance receipt. The corrected reconstruction now drives stock
-`depth_image_proc`: a subscriber received a 640-wide organized `PointCloud2`,
-and RViz2 displayed the live reconstructed depth image and cloud after a static
-optical-frame transform was supplied. The roughly planar wall appeared as sparse
-separated lobes, so the visual geometry check failed usefully. This phase
-remains partial rather than complete.
+Current status: scanner-computed Z16Y8Y8 now drives stock `depth_image_proc`, and
+a subscriber received a 640-wide organized `PointCloud2`. RViz2 launched with
+the supplied configuration and subscribed to the direct-depth cloud after a
+static optical-frame transform was supplied. Wayland denied automated screenshot
+capture, and measured plane/motion checks still require manual evidence, so this
+phase remains partial rather than complete.
 
 ### 8. Continue into turntable RGB-D capture ([#8](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/8))
 
-After the depth milestone, add RGB synchronization, cross-camera calibration,
-foreground masks, known turntable angles, replayable capture archives, and
-dataset adapters. Reconstruction software is selected using those observed
-captures rather than assumed compatibility.
+In progress: a black-box trace identified the 1280×800 RGB profile, RGB sensor
+enable control, free-running trigger requirement, and camera-50 media endpoint.
+The clean-room Rust path now recovers envelope-delimited JPEG frames, validates
+their dimensions, separates an observed four-byte post-JPEG transport trailer,
+and writes an ordinary JPEG. A live smoke produced a recognizable 1280×800 wall
+image. RGB/depth synchronization, registration, calibration, archive format,
+turntable angle metadata, masking, and dataset adapters remain open.
 
 ## Red-green workflow
 

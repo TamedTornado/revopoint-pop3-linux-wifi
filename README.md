@@ -141,6 +141,17 @@ zero remains invalid. The command reports robust median, MAD, and p10–p90 dept
 statistics so a measured planar target can be checked without trusting a
 picture alone.
 
+The first turntable prerequisite—independent RGB acquisition—is also available:
+
+```sh
+cargo run --release -- --smoke-rgb 192.168.8.245 /tmp/pop3
+```
+
+This uses the scanner's 1280×800 RGB stream and writes a validated ordinary
+JPEG to `/tmp/pop3-rgb.jpg`. The driver strips the observed four-byte transport
+trailer rather than leaving non-JPEG bytes in the output. Depth/RGB temporal
+synchronization and registration are deliberately not claimed yet.
+
 The disparity image is currently a diagnostic, not qualified metric depth. It
 uses a bounded 0–160 pixel search, a 15×15 SAD support window, a provisional 1%
 best-versus-runner-up cost margin, and a one-pixel left/right consistency check.

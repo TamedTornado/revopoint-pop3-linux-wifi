@@ -30,6 +30,27 @@ const PROFILE_SETTLE_TIME: Duration = Duration::from_millis(300);
 const EMITTER_SETTLE_TIME: Duration = Duration::from_millis(300);
 const SELECTOR_ATTEMPTS: usize = 3;
 
+struct CaptureProfile {
+    profile_path: &'static str,
+    output_selector: &'static str,
+    set_free_running_trigger: bool,
+    capture_stage: &'static str,
+}
+
+const Z16Y8Y8_CAPTURE: CaptureProfile = CaptureProfile {
+    profile_path: SET_Z16Y8Y8_PROFILE,
+    output_selector: SET_Z16Y8Y8_FORMAT,
+    set_free_running_trigger: true,
+    capture_stage: "capture Z16Y8Y8 media",
+};
+
+const PAIR_CAPTURE: CaptureProfile = CaptureProfile {
+    profile_path: SET_PAIR_PROFILE,
+    output_selector: SET_PAIR_FORMAT,
+    set_free_running_trigger: false,
+    capture_stage: "capture PAIR media",
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DepthResolution {
     pub width: u32,
@@ -175,16 +196,7 @@ pub fn capture_depth_prefix(
         stage: "close existing streams",
         source,
     })?;
-    capture_prefix(
-        address,
-        limits,
-        prefix_bytes,
-        receive,
-        SET_Z16Y8Y8_PROFILE,
-        SET_Z16Y8Y8_FORMAT,
-        true,
-        "capture Z16Y8Y8 media",
-    )
+    capture_prefix(address, limits, prefix_bytes, receive, Z16Y8Y8_CAPTURE)
 }
 
 pub fn get_current_depth_resolution(
@@ -219,16 +231,7 @@ pub fn capture_pair_prefix(
     prefix_bytes: usize,
     receive: impl FnMut(&[u8]),
 ) -> Result<usize, DepthStreamError> {
-    capture_prefix(
-        address,
-        limits,
-        prefix_bytes,
-        receive,
-        SET_PAIR_PROFILE,
-        SET_PAIR_FORMAT,
-        false,
-        "capture PAIR media",
-    )
+    capture_prefix(address, limits, prefix_bytes, receive, PAIR_CAPTURE)
 }
 
 fn capture_prefix(
@@ -236,18 +239,16 @@ fn capture_prefix(
     limits: StreamLimits,
     prefix_bytes: usize,
     receive: impl FnMut(&[u8]),
-    profile_path: &'static str,
-    output_selector: &'static str,
-    set_free_running_trigger: bool,
-    capture_stage: &'static str,
+    profile: CaptureProfile,
 ) -> Result<usize, DepthStreamError> {
-    let profile = get_bounded_body(address, profile_path, limits).map_err(|source| {
-        DepthStreamError::Http {
-            stage: "configure depth profile",
-            source,
-        }
-    })?;
-    if trim_ascii_whitespace(&profile) != br#"{"result":0}"# {
+    let profile_response =
+        get_bounded_body(address, profile.profile_path, limits).map_err(|source| {
+            DepthStreamError::Http {
+                stage: "configure depth profile",
+                source,
+            }
+        })?;
+    if trim_ascii_whitespace(&profile_response) != br#"{"result":0}"# {
         return Err(DepthStreamError::RejectedProfile);
     }
 
@@ -256,7 +257,7 @@ fn capture_prefix(
     // reboot or reconnect the scanner when changing selectors.
     thread::sleep(PROFILE_SETTLE_TIME);
     for attempt in 0..SELECTOR_ATTEMPTS {
-        match get_bounded_body(address, output_selector, limits) {
+        match get_bounded_body(address, profile.output_selector, limits) {
             Ok(configuration) if trim_ascii_whitespace(&configuration) == br#"{"result":0}"# => {
                 break;
             }
@@ -276,7 +277,7 @@ fn capture_prefix(
         }
     }
 
-    if set_free_running_trigger {
+    if profile.set_free_running_trigger {
         let trigger =
             get_bounded_body(address, SET_FREE_RUNNING_TRIGGER, limits).map_err(|source| {
                 DepthStreamError::Http {
@@ -304,7 +305,7 @@ fn capture_prefix(
     match (capture, close, infrared_off, master_off) {
         (Ok(received), Ok(_), Ok(()), Ok(())) => Ok(received),
         (Err(source), _, _, _) => Err(DepthStreamError::Http {
-            stage: capture_stage,
+            stage: profile.capture_stage,
             source,
         }),
         (Ok(_), Err(source), _, _) => Err(DepthStreamError::Http {

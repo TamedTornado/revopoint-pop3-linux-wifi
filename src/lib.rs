@@ -12,6 +12,8 @@ pub mod depth_stream;
 pub mod frame_envelope;
 pub mod http_stream;
 pub mod pair_decode;
+pub mod rgb_decode;
+pub mod rgb_stream;
 #[cfg(feature = "ros2")]
 pub mod ros2_adapter;
 pub mod ros_camera;
@@ -356,6 +358,7 @@ fn run(write: bool, diagnose: bool) -> Result<(), Box<dyn Error>> {
 
 const PAIR_PREFIX_BYTES: usize = 1024 * 1024;
 const DEPTH_PREFIX_BYTES: usize = 2 * 1024 * 1024;
+const RGB_PREFIX_BYTES: usize = 1024 * 1024;
 const MAXIMUM_DISPARITY: u16 = 160;
 const MINIMUM_MATCH_MARGIN_PERCENT: u16 = 1;
 
@@ -443,6 +446,37 @@ fn capture_depth_frame(
     let frame = first_frame
         .ok_or_else(|| failure("bounded capture contained no complete Z16Y8Y8 frame"))?;
     Ok((received, frame))
+}
+
+fn capture_rgb_frame(
+    address: SocketAddr,
+    limits: http_stream::StreamLimits,
+) -> Result<(usize, Vec<u8>, rgb_decode::JpegInformation), Box<dyn Error>> {
+    let mut parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
+    let mut first_frame = None;
+    let mut frame_error: Option<Box<dyn Error>> = None;
+    let received = rgb_stream::capture_rgb_prefix(address, limits, RGB_PREFIX_BYTES, |chunk| {
+        if first_frame.is_some() || frame_error.is_some() {
+            return;
+        }
+        match parser.push(chunk) {
+            Ok(frames) => {
+                if let Some(frame) = frames.into_iter().next() {
+                    match rgb_decode::inspect_jpeg(&frame.payload) {
+                        Ok(information) => first_frame = Some((frame.payload, information)),
+                        Err(error) => frame_error = Some(Box::new(error)),
+                    }
+                }
+            }
+            Err(error) => frame_error = Some(Box::new(error)),
+        }
+    })?;
+    if let Some(error) = frame_error {
+        return Err(error);
+    }
+    let (jpeg, information) = first_frame
+        .ok_or_else(|| failure("bounded capture contained no complete RGB JPEG frame"))?;
+    Ok((received, jpeg, information))
 }
 
 struct ReconstructedPair {
@@ -607,6 +641,23 @@ fn smoke_depth(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn smoke_rgb(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
+    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let (received, jpeg, information) = capture_rgb_frame(address, network_limits())?;
+    if information.width != 1280 || information.height != 800 {
+        return Err(failure(
+            "RGB JPEG dimensions disagree with the selected profile",
+        ));
+    }
+    let path = format!("{output_prefix}-rgb.jpg");
+    std::fs::write(&path, &jpeg[..information.encoded_len])?;
+    println!(
+        "RGB stream smoke passed: bytes={received}, resolution={}x{}, image={path}",
+        information.width, information.height
+    );
+    Ok(())
+}
+
 #[cfg(feature = "ros2")]
 fn ros2_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     use rclrs::CreateBasicExecutor;
@@ -687,6 +738,15 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 }
             };
         }
+        [argument, ip, output_prefix] if argument == "--smoke-rgb" => {
+            return match smoke_rgb(ip, output_prefix) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
         [argument, ip] if argument == "--ros2-depth" => {
             return match ros2_depth(ip) {
                 Ok(()) => 0,
@@ -697,19 +757,20 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             }
         }
         [argument] if argument == "--help" || argument == "-h" => {
-            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
             println!("  --diagnose    Report scanner-side Wi-Fi diagnostics over USB");
             println!("  --smoke-depth IP OUTPUT_PREFIX  Save device-computed depth and infrared PGM images");
+            println!("  --smoke-rgb IP OUTPUT_PREFIX  Save one validated RGB JPEG image");
             println!("  --smoke-pair IP OUTPUT_PREFIX  Save left/right infrared PGM images");
             println!("  --ros2-depth IP  Publish 20 experimental reconstructed ROS 2 frames");
             println!("  -h, --help    Show this help");
             return 0;
         }
         _ => {
-            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             return 2;
         }
     };

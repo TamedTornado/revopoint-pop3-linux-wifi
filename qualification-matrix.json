@@ -52,7 +52,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the new PAIR decoder, emitter fail-closed paths, stereo matcher/PGM encoder, and map/Q parser/reprojection focused sets catch all viable mutants exercised. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
+      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the new PAIR decoder, emitter fail-closed paths, stereo matcher/disparity encoder, map/Q parser/full reprojection, and metric Z16/PGM focused sets catch all viable mutants exercised. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
     },
     {
       "id": "hardware-byte-stream",

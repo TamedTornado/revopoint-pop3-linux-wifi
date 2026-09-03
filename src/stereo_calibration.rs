@@ -33,28 +33,55 @@ pub struct ReprojectionMatrix {
 
 impl ReprojectionMatrix {
     pub fn depth_mm(self, disparity_px: f32, disparity_scale: f32) -> Option<f32> {
-        if !disparity_px.is_finite() {
+        self.point_mm(0.0, 0.0, disparity_px, disparity_scale, disparity_scale)
+            .map(|point| point[2])
+    }
+
+    pub fn point_mm(
+        self,
+        pixel_x: f32,
+        pixel_y: f32,
+        disparity_px: f32,
+        horizontal_scale: f32,
+        vertical_scale: f32,
+    ) -> Option<[f32; 3]> {
+        if !pixel_x.is_finite()
+            || pixel_x < 0.0
+            || !pixel_y.is_finite()
+            || pixel_y < 0.0
+            || !disparity_px.is_finite()
+            || disparity_px < 0.0
+            || !horizontal_scale.is_finite()
+            || horizontal_scale <= 0.0
+            || !vertical_scale.is_finite()
+            || vertical_scale <= 0.0
+        {
             return None;
         }
-        if disparity_px < 0.0 {
-            return None;
-        }
-        if !disparity_scale.is_finite() {
-            return None;
-        }
-        if disparity_scale <= 0.0 {
-            return None;
-        }
-        let calibrated_disparity = disparity_px * disparity_scale;
-        let homogeneous_scale = self.values[14] * calibrated_disparity + self.values[15];
-        let depth = self.values[11] / homogeneous_scale;
+        let input = [
+            pixel_x * horizontal_scale,
+            pixel_y * vertical_scale,
+            disparity_px * horizontal_scale,
+            1.0,
+        ];
+        let projected = std::array::from_fn::<f32, 4, _>(|row| {
+            (0..4)
+                .map(|column| self.values[row * 4 + column] * input[column])
+                .sum()
+        });
+        let homogeneous_scale = projected[3];
         if !homogeneous_scale.is_finite() || homogeneous_scale.abs() <= f32::EPSILON {
             return None;
         }
-        if !depth.is_finite() || depth <= 0.0 {
+        let point = [
+            projected[0] / homogeneous_scale,
+            projected[1] / homogeneous_scale,
+            projected[2] / homogeneous_scale,
+        ];
+        if !point.iter().all(|value| value.is_finite()) || point[2] <= 0.0 {
             return None;
         }
-        Some(depth)
+        Some(point)
     }
 }
 

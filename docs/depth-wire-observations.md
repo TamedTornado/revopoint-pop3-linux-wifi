@@ -103,11 +103,16 @@ qualified depth.
 
 The accompanying 4×4 Q record follows the standard homogeneous reprojection
 shape. Scaling half-resolution disparity back to calibration resolution and
-dividing Q's Z numerator by its homogeneous W term produced a 259.8 mm median
+applying the complete homogeneous transform per pixel produced a 260 mm median
 after provisional uniqueness and consistency filtering. That run retained
 53,113 of 256,000 pixels (20.7%); the wall's physical distance was estimated
 only as 150–300 mm. The broad agreement supports the interpretation but is
 intentionally not a metric acceptance result.
+
+The smoke tool also serializes this experimental metric plane as a 16-bit PGM:
+samples are unsigned millimeters in network byte order, as required by PGM,
+with zero reserved for invalid correspondence. ImageMagick identifies a live
+artifact as 640×400, 16-bit, with a 0–272 sample range.
 
 The scanner's read-only `get_depth_reso` endpoint reports `curr-resolution` as
 `640x400x2`. That is also the total byte count for two Y8 planes: 512,000 bytes.

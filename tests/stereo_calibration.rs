@@ -186,6 +186,40 @@ fn parses_q_and_converts_scaled_disparity_to_metric_depth() {
     assert_eq!(q.depth_mm(f32::NAN, 1.0), None);
     assert_eq!(q.depth_mm(1.0, f32::NAN), None);
 
+    let mut full_q = q;
+    full_q.values[3] = -2.0;
+    full_q.values[7] = -3.0;
+    full_q.values[12] = 0.01;
+    full_q.values[13] = 0.02;
+    full_q.values[15] = 1.0;
+    let point = full_q
+        .point_mm(4.0, 5.0, 4.0, 1.0, 1.0)
+        .expect("reprojected point");
+    assert!((point[0] - 2.0 / 1.54).abs() < 0.001);
+    assert!((point[1] - 2.0 / 1.54).abs() < 0.001);
+    assert!((point[2] - 100.0 / 1.54).abs() < 0.001);
+    let scaled_point = full_q
+        .point_mm(4.0, 5.0, 4.0, 2.0, 3.0)
+        .expect("scaled reprojected point");
+    assert!((scaled_point[0] - 6.0 / 2.18).abs() < 0.001);
+    assert!((scaled_point[1] - 12.0 / 2.18).abs() < 0.001);
+    assert!((scaled_point[2] - 100.0 / 2.18).abs() < 0.001);
+
+    for invalid in [
+        full_q.point_mm(f32::NAN, 1.0, 1.0, 1.0, 1.0),
+        full_q.point_mm(-1.0, 1.0, 1.0, 1.0, 1.0),
+        full_q.point_mm(1.0, f32::NAN, 1.0, 1.0, 1.0),
+        full_q.point_mm(1.0, -1.0, 1.0, 1.0, 1.0),
+        full_q.point_mm(1.0, 1.0, f32::NAN, 1.0, 1.0),
+        full_q.point_mm(1.0, 1.0, -1.0, 1.0, 1.0),
+        full_q.point_mm(1.0, 1.0, 1.0, f32::NAN, 1.0),
+        full_q.point_mm(1.0, 1.0, 1.0, 0.0, 1.0),
+        full_q.point_mm(1.0, 1.0, 1.0, 1.0, f32::NAN),
+        full_q.point_mm(1.0, 1.0, 1.0, 1.0, 0.0),
+    ] {
+        assert_eq!(invalid, None);
+    }
+
     let mut offset_q = q;
     offset_q.values[15] = 2.0;
     assert_eq!(offset_q.depth_mm(-1.0, 1.0), None);

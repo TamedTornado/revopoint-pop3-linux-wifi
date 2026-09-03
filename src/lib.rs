@@ -16,6 +16,7 @@ pub mod pair_decode;
 pub mod ros2_adapter;
 pub mod ros_camera;
 pub mod stereo_calibration;
+pub mod stereo_depth;
 pub mod stereo_match;
 
 const VID: u16 = 0x2207;
@@ -412,6 +413,8 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
             consistency_tolerance: 1,
         },
     )?;
+    let valid_pixels = disparity.valid_count();
+    let valid_percent = valid_pixels as f64 * 100.0 / disparity.values.len() as f64;
     let mut valid_disparities = disparity
         .values
         .iter()
@@ -423,19 +426,31 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         .get(valid_disparities.len() / 2)
         .copied()
         .ok_or_else(|| failure("block matcher produced no valid disparities"))?;
-    let disparity_scale = maps.left.calibration_width as f32 / pair.width as f32;
-    let experimental_median_depth_mm = reprojection
-        .depth_mm(f32::from(median_disparity), disparity_scale)
-        .ok_or_else(|| {
-            failure("median disparity cannot be reprojected to positive metric depth")
-        })?;
+    let depth = stereo_depth::reproject_z16(
+        &disparity,
+        reprojection,
+        maps.left.calibration_width,
+        maps.left.calibration_height,
+    )?;
+    let mut valid_depths = depth
+        .bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|sample| u16::from_le_bytes(*sample))
+        .filter(|sample| *sample != 0)
+        .collect::<Vec<_>>();
+    valid_depths.sort_unstable();
+    let experimental_median_depth_mm = valid_depths
+        .get(valid_depths.len() / 2)
+        .copied()
+        .ok_or_else(|| failure("reprojection produced no positive metric depths"))?;
     let left_path = format!("{output_prefix}-left.pgm");
     let right_path = format!("{output_prefix}-right.pgm");
     let left_rectified_path = format!("{output_prefix}-left-rectified.pgm");
     let right_rectified_path = format!("{output_prefix}-right-rectified.pgm");
     let disparity_path = format!("{output_prefix}-disparity.pgm");
-    let valid_pixels = disparity.valid_count();
-    let valid_percent = valid_pixels as f64 * 100.0 / disparity.values.len() as f64;
+    let depth_path = format!("{output_prefix}-depth-mm.pgm");
     std::fs::write(
         &left_path,
         pair_decode::encode_y8_pgm(pair.width, pair.height, &pair.left)?,
@@ -456,8 +471,9 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         &disparity_path,
         stereo_match::encode_disparity_pgm(&disparity, MAXIMUM_DISPARITY)?,
     )?;
+    std::fs::write(&depth_path, stereo_depth::encode_z16_pgm(&depth)?)?;
     println!(
-        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}, left_rectified={left_rectified_path}, right_rectified={right_rectified_path}, disparity={disparity_path}, valid_pixels={valid_pixels} ({valid_percent:.1}%), median_disparity_px={median_disparity}, experimental_median_depth_mm={experimental_median_depth_mm:.1}",
+        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}, left_rectified={left_rectified_path}, right_rectified={right_rectified_path}, disparity={disparity_path}, depth_mm={depth_path}, valid_pixels={valid_pixels} ({valid_percent:.1}%), median_disparity_px={median_disparity}, experimental_median_depth_mm={experimental_median_depth_mm}",
         pair.width, pair.height
     );
     Ok(())

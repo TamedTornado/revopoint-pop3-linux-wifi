@@ -83,9 +83,10 @@ First reconstruction slice: the 148-byte left/right map-parameter records are
 parsed and validated in clean-room Rust. The Y8 planes can be rectified using
 their Brown–Conrady coefficients and inverse rectification matrices. A bounded
 block matcher with a provisional uniqueness margin and left/right consistency
-emits an experimental PGM disparity image for immediate inspection in a stock
-Linux viewer. The scanner's Q matrix is parsed and applied with the
-calibration-to-stream disparity scale. A confidence-filtered live wall run kept
+emits experimental disparity and 16-bit millimeter-depth PGM images for
+immediate inspection in a stock Linux viewer. The scanner's Q matrix is parsed
+and applied per pixel with the calibration-to-stream coordinate and disparity
+scales. A confidence-filtered live wall run kept
 53,113 of 256,000 pixels (20.7%) and returned an experimental median of 259.8 mm
 while the target was known only to be roughly 150–300 mm away. This is a sanity
 check, not yet accepted metric depth.

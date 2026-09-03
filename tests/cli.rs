@@ -23,7 +23,21 @@ fn help_is_available_without_scanner_hardware() {
     assert!(stdout.contains("--set-depth-exposure"));
     assert!(stdout.contains("--set-depth-auto-exposure"));
     assert!(stdout.contains("--depth-auto-exposure"));
+    assert!(stdout.contains("usb is reserved"));
     assert!(!stdout.contains("--measure-plane"));
     assert!(stdout.contains("--ros2-depth"));
     assert!(stdout.contains("experimental"));
+}
+
+#[test]
+fn usb_is_a_recognized_but_explicitly_unimplemented_capture_input() {
+    let output = Command::new(env!("CARGO_BIN_EXE_revopoint-pop3-wifi"))
+        .args(["--smoke-depth", "usb", "/tmp/pop3-unused"])
+        .output()
+        .expect("run capture CLI");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8(output.stderr)
+        .expect("stderr is UTF-8")
+        .contains("USB media acquisition is not implemented yet"));
 }

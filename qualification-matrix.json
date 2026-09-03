@@ -18,6 +18,7 @@
     "hardware_rgb_calibration_pass": true,
     "hardware_depth_controls_pass": true,
     "hardware_concurrent_rgbd_transport_pass": true,
+    "direct_usb_media_pass": false,
     "ros_depth_camera_pass": true,
     "rviz_live_acceptance_pass": false
   },
@@ -117,6 +118,14 @@
       "command": "cargo run --release -- --smoke-rgbd SCANNER_IP OUTPUT_PREFIX",
       "status": "PASS",
       "claim": "The clean-room Rust command collected eight camera-21 depth and eight camera-50 RGB candidates, extracted both device-clock timestamps, selected the closest pair with RGB following depth inside a 50 ms bound, and wrote 640x400 depth and 1280x800 RGB images. A live run rejected a 171 ms startup-skewed first pair and then selected a 15 ms pair from the overlapping candidate windows"
+    },
+    {
+      "id": "direct-usb-media",
+      "tier": "hardware",
+      "environment": "POP 3 Plus attached by USB data cable",
+      "command": "cargo run --release -- --smoke-rgbd usb OUTPUT_PREFIX",
+      "status": "NOT_IMPLEMENTED",
+      "claim": "USB is a first-class parsed input mode with an explicit unsupported-backend error. Provisioning already uses USB, but direct USB depth/RGB media acquisition and camera-control transport remain to be implemented and hardware-qualified."
     },
     {
       "id": "colored-ply-interoperability",

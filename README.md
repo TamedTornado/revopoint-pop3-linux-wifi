@@ -135,6 +135,21 @@ For the simpler scanner-computed depth slice:
 cargo run --release -- --smoke-depth 192.168.8.245 /tmp/pop3-direct
 ```
 
+Capture and camera-control commands now parse their scanner argument as an
+explicit input mode. An IP address selects the working Wi-Fi transport; `usb`
+selects the reserved direct-USB transport. Direct USB media acquisition is not
+implemented yet and returns a specific error instead of silently falling back
+to Wi-Fi:
+
+```sh
+cargo run --release -- --smoke-depth usb /tmp/pop3-direct
+# Error: USB media acquisition is not implemented yet; use a scanner IP for Wi-Fi input
+```
+
+This boundary is intentional: decoding, calibration, registration, archiving,
+and reconstruction remain independent of transport, while a future USB backend
+will replace only acquisition and camera-control I/O.
+
 This writes `/tmp/pop3-direct-depth-mm.pgm`, `-left.pgm`, and `-right.pgm`.
 The depth PGM converts the scanner's 0.1 mm raw units to unsigned millimeters;
 zero remains invalid. The command reports robust median, MAD, and p10–p90 depth

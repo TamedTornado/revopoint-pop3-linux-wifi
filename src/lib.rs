@@ -2,7 +2,7 @@ use rusb::{DeviceHandle, GlobalContext};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self, Write};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::thread;
 use std::time::Duration;
 
@@ -23,6 +23,7 @@ pub mod rgbd_stream;
 #[cfg(feature = "ros2")]
 pub mod ros2_adapter;
 pub mod ros_camera;
+pub mod scanner_input;
 pub mod stereo_calibration;
 pub mod stereo_depth;
 pub mod stereo_match;
@@ -558,7 +559,9 @@ fn reconstruct_pair(
 }
 
 fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
-    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let address = ip
+        .parse::<scanner_input::ScannerInput>()?
+        .network_address()?;
     let limits = network_limits();
     let (received, pair) = capture_pair_frame(address, limits)?;
     let maps = stereo_calibration::get_stereo_map_parameters(address, limits)?;
@@ -628,7 +631,9 @@ fn smoke_depth(
     output_prefix: &str,
     control: camera_control::DepthControl,
 ) -> Result<(), Box<dyn Error>> {
-    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let address = ip
+        .parse::<scanner_input::ScannerInput>()?
+        .network_address()?;
     let (received, frame) = capture_depth_frame(address, network_limits(), control)?;
     let statistics = frame.depth.statistics();
     let robust_statistics = stereo_depth::depth_z_statistics(&frame.depth)?;
@@ -664,7 +669,9 @@ fn smoke_depth(
 }
 
 fn smoke_rgb(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
-    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let address = ip
+        .parse::<scanner_input::ScannerInput>()?
+        .network_address()?;
     let (received, jpeg, information) = capture_rgb_frame(address, network_limits())?;
     if information.width != 1280 || information.height != 800 {
         return Err(failure(
@@ -688,7 +695,9 @@ fn smoke_rgbd(
 ) -> Result<(), Box<dyn Error>> {
     const CANDIDATE_FRAMES: usize = 8;
 
-    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let address = ip
+        .parse::<scanner_input::ScannerInput>()?
+        .network_address()?;
     let mut limits = network_limits();
     limits.max_body_bytes = 8 * 1024 * 1024;
     let mut depth_parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
@@ -873,7 +882,9 @@ fn smoke_rgbd(
 }
 
 fn inspect_rgb_calibration(ip: &str) -> Result<(), Box<dyn Error>> {
-    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let address = ip
+        .parse::<scanner_input::ScannerInput>()?
+        .network_address()?;
     let calibration = rgb_calibration::get_rgb_calibration(address, network_limits())?;
     let intrinsics = calibration.intrinsics;
     println!(
@@ -917,7 +928,9 @@ fn parse_auto_depth_control(value: &str) -> Result<camera_control::DepthControl,
 }
 
 fn show_depth_controls(ip: &str) -> Result<(), Box<dyn Error>> {
-    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let address = ip
+        .parse::<scanner_input::ScannerInput>()?
+        .network_address()?;
     let range = camera_control::depth_exposure_range(address, network_limits())?;
     println!(
         "Depth exposure: min={} us, max={} us, step={} us, default={} us",
@@ -931,7 +944,9 @@ fn set_depth_control(
     ip: &str,
     control: camera_control::DepthControl,
 ) -> Result<(), Box<dyn Error>> {
-    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let address = ip
+        .parse::<scanner_input::ScannerInput>()?
+        .network_address()?;
     camera_control::set_depth_control(address, network_limits(), control)?;
     println!("Depth control applied: {control:?}");
     Ok(())
@@ -949,7 +964,9 @@ fn ros2_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     use rclrs::CreateBasicExecutor;
 
     const BATCHES: usize = 20;
-    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let address = ip
+        .parse::<scanner_input::ScannerInput>()?
+        .network_address()?;
     let limits = network_limits();
     let intrinsics =
         calibration::get_depth_intrinsics(address, limits)?.for_resolution(640, 400)?;
@@ -1228,6 +1245,7 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             println!(
                 "  Capture options: --depth-exposure MICROSECONDS or --depth-auto-exposure MODE"
             );
+            println!("  Scanner input: use an IP address for Wi-Fi; usb is reserved for the direct-USB backend");
             println!("  --smoke-pair IP OUTPUT_PREFIX  Save left/right infrared PGM images");
             println!("  --ros2-depth IP  Publish 20 experimental reconstructed ROS 2 frames");
             println!("  -h, --help    Show this help");

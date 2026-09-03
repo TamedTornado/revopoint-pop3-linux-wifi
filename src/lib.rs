@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 pub mod calibration;
+pub mod camera_control;
 pub mod capture_archive;
 pub mod depth_decode;
 pub mod depth_stream;
@@ -384,8 +385,12 @@ fn capture_pair_frame(
     let mut parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
     let mut first_pair = None;
     let mut frame_error: Option<Box<dyn Error>> = None;
-    let received =
-        depth_stream::capture_pair_prefix(address, limits, PAIR_PREFIX_BYTES, |chunk| {
+    let received = depth_stream::capture_pair_prefix_with_control(
+        address,
+        limits,
+        PAIR_PREFIX_BYTES,
+        camera_control::DepthControl::default(),
+        |chunk| {
             if first_pair.is_some() || frame_error.is_some() {
                 return;
             }
@@ -405,7 +410,8 @@ fn capture_pair_frame(
                 }
                 Err(error) => frame_error = Some(Box::new(error)),
             }
-        })?;
+        },
+    )?;
     if let Some(error) = frame_error {
         return Err(error);
     }
@@ -417,13 +423,18 @@ fn capture_pair_frame(
 fn capture_depth_frame(
     address: SocketAddr,
     limits: http_stream::StreamLimits,
+    control: camera_control::DepthControl,
 ) -> Result<(usize, depth_decode::Z16Y8Y8Frame), Box<dyn Error>> {
     let scale = depth_stream::get_depth_scale_mm(address, limits)?;
     let mut parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
     let mut first_frame = None;
     let mut frame_error: Option<Box<dyn Error>> = None;
-    let received =
-        depth_stream::capture_depth_prefix(address, limits, DEPTH_PREFIX_BYTES, |chunk| {
+    let received = depth_stream::capture_depth_prefix_with_control(
+        address,
+        limits,
+        DEPTH_PREFIX_BYTES,
+        control,
+        |chunk| {
             if first_frame.is_some() || frame_error.is_some() {
                 return;
             }
@@ -444,7 +455,8 @@ fn capture_depth_frame(
                 }
                 Err(error) => frame_error = Some(Box::new(error)),
             }
-        })?;
+        },
+    )?;
     if let Some(error) = frame_error {
         return Err(error);
     }
@@ -611,9 +623,13 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn smoke_depth(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
+fn smoke_depth(
+    ip: &str,
+    output_prefix: &str,
+    control: camera_control::DepthControl,
+) -> Result<(), Box<dyn Error>> {
     let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
-    let (received, frame) = capture_depth_frame(address, network_limits())?;
+    let (received, frame) = capture_depth_frame(address, network_limits(), control)?;
     let statistics = frame.depth.statistics();
     let robust_statistics = stereo_depth::depth_z_statistics(&frame.depth)?;
     let valid_percent = statistics.nonzero_samples as f64 * 100.0 / statistics.samples as f64;
@@ -668,6 +684,7 @@ fn smoke_rgbd(
     ip: &str,
     output_prefix: &str,
     turntable: Option<capture_archive::TurntableRecord>,
+    control: camera_control::DepthControl,
 ) -> Result<(), Box<dyn Error>> {
     const CANDIDATE_FRAMES: usize = 8;
 
@@ -680,9 +697,10 @@ fn smoke_rgbd(
     let mut rgb_frames = Vec::with_capacity(CANDIDATE_FRAMES);
     let mut depth_error = None;
     let mut rgb_error = None;
-    let (depth_received, rgb_received) = rgbd_stream::capture_rgbd_until(
+    let (depth_received, rgb_received) = rgbd_stream::capture_rgbd_until_with_control(
         address,
         limits,
+        control,
         |chunk| {
             if depth_envelopes.len() < CANDIDATE_FRAMES && depth_error.is_none() {
                 match depth_parser.push(chunk) {
@@ -886,6 +904,39 @@ fn replay_archive(directory: &str, output: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn parse_manual_depth_control(value: &str) -> Result<camera_control::DepthControl, Box<dyn Error>> {
+    Ok(camera_control::DepthControl::ManualExposureUs(
+        value
+            .parse::<u32>()
+            .map_err(|_| failure("depth exposure must be an integer number of microseconds"))?,
+    ))
+}
+
+fn parse_auto_depth_control(value: &str) -> Result<camera_control::DepthControl, Box<dyn Error>> {
+    Ok(camera_control::DepthControl::AutoExposure(value.parse()?))
+}
+
+fn show_depth_controls(ip: &str) -> Result<(), Box<dyn Error>> {
+    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let range = camera_control::depth_exposure_range(address, network_limits())?;
+    println!(
+        "Depth exposure: min={} us, max={} us, step={} us, default={} us",
+        range.minimum_us, range.maximum_us, range.step_us, range.default_us
+    );
+    println!("Depth auto-exposure modes: off, fixed-frame-time, high-quality, foreground");
+    Ok(())
+}
+
+fn set_depth_control(
+    ip: &str,
+    control: camera_control::DepthControl,
+) -> Result<(), Box<dyn Error>> {
+    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    camera_control::set_depth_control(address, network_limits(), control)?;
+    println!("Depth control applied: {control:?}");
+    Ok(())
+}
+
 fn load_turntable_record(path: &str) -> Result<capture_archive::TurntableRecord, Box<dyn Error>> {
     let bytes = std::fs::read(path)?;
     let record = serde_json::from_slice(&bytes)?;
@@ -912,7 +963,8 @@ fn ros2_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     thread::sleep(Duration::from_secs(1));
 
     for batch in 0..BATCHES {
-        let (_, direct) = capture_depth_frame(address, limits)?;
+        let (_, direct) =
+            capture_depth_frame(address, limits, camera_control::DepthControl::default())?;
         let frame = ros_camera::map_depth_camera(
             direct.depth,
             intrinsics,
@@ -965,7 +1017,33 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             }
         }
         [argument, ip, output_prefix] if argument == "--smoke-depth" => {
-            return match smoke_depth(ip, output_prefix) {
+            return match smoke_depth(ip, output_prefix, camera_control::DepthControl::default()) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
+        [argument, ip, output_prefix, option, value]
+            if argument == "--smoke-depth" && option == "--depth-exposure" =>
+        {
+            return match parse_manual_depth_control(value)
+                .and_then(|control| smoke_depth(ip, output_prefix, control))
+            {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
+        [argument, ip, output_prefix, option, value]
+            if argument == "--smoke-depth" && option == "--depth-auto-exposure" =>
+        {
+            return match parse_auto_depth_control(value)
+                .and_then(|control| smoke_depth(ip, output_prefix, control))
+            {
                 Ok(()) => 0,
                 Err(error) => {
                     eprintln!("Error: {error}");
@@ -983,7 +1061,38 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             };
         }
         [argument, ip, output_prefix] if argument == "--smoke-rgbd" => {
-            return match smoke_rgbd(ip, output_prefix, None) {
+            return match smoke_rgbd(
+                ip,
+                output_prefix,
+                None,
+                camera_control::DepthControl::default(),
+            ) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
+        [argument, ip, output_prefix, option, value]
+            if argument == "--smoke-rgbd" && option == "--depth-exposure" =>
+        {
+            return match parse_manual_depth_control(value)
+                .and_then(|control| smoke_rgbd(ip, output_prefix, None, control))
+            {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
+        [argument, ip, output_prefix, option, value]
+            if argument == "--smoke-rgbd" && option == "--depth-auto-exposure" =>
+        {
+            return match parse_auto_depth_control(value)
+                .and_then(|control| smoke_rgbd(ip, output_prefix, None, control))
+            {
                 Ok(()) => 0,
                 Err(error) => {
                     eprintln!("Error: {error}");
@@ -992,8 +1101,72 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             };
         }
         [argument, ip, output_prefix, metadata] if argument == "--capture-turntable" => {
-            return match load_turntable_record(metadata)
-                .and_then(|record| smoke_rgbd(ip, output_prefix, Some(record)))
+            return match load_turntable_record(metadata).and_then(|record| {
+                smoke_rgbd(
+                    ip,
+                    output_prefix,
+                    Some(record),
+                    camera_control::DepthControl::default(),
+                )
+            }) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
+        [argument, ip, output_prefix, metadata, option, value]
+            if argument == "--capture-turntable" && option == "--depth-exposure" =>
+        {
+            return match load_turntable_record(metadata).and_then(|record| {
+                parse_manual_depth_control(value)
+                    .and_then(|control| smoke_rgbd(ip, output_prefix, Some(record), control))
+            }) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
+        [argument, ip, output_prefix, metadata, option, value]
+            if argument == "--capture-turntable" && option == "--depth-auto-exposure" =>
+        {
+            return match load_turntable_record(metadata).and_then(|record| {
+                parse_auto_depth_control(value)
+                    .and_then(|control| smoke_rgbd(ip, output_prefix, Some(record), control))
+            }) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
+        [argument, ip] if argument == "--depth-controls" => {
+            return match show_depth_controls(ip) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
+        [argument, ip, exposure] if argument == "--set-depth-exposure" => {
+            return match parse_manual_depth_control(exposure)
+                .and_then(|control| set_depth_control(ip, control))
+            {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
+        [argument, ip, mode] if argument == "--set-depth-auto-exposure" => {
+            return match parse_auto_depth_control(mode)
+                .and_then(|control| set_depth_control(ip, control))
             {
                 Ok(()) => 0,
                 Err(error) => {
@@ -1048,6 +1221,12 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             );
             println!(
                 "  --inspect-rgb-calibration IP  Print RGB intrinsics and left-to-RGB transform"
+            );
+            println!("  --depth-controls IP  Show supported depth exposure controls");
+            println!("  --set-depth-exposure IP MICROSECONDS  Set validated manual exposure");
+            println!("  --set-depth-auto-exposure IP MODE  Set off, fixed-frame-time, high-quality, or foreground");
+            println!(
+                "  Capture options: --depth-exposure MICROSECONDS or --depth-auto-exposure MODE"
             );
             println!("  --smoke-pair IP OUTPUT_PREFIX  Save left/right infrared PGM images");
             println!("  --ros2-depth IP  Publish 20 experimental reconstructed ROS 2 frames");

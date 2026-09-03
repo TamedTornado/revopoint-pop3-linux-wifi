@@ -206,3 +206,34 @@ wall. The accompanying left infrared image showed the same wall boundary and
 projected texture. This qualifies the acquisition and plane-splitting slice;
 it does not yet qualify absolute accuracy because the target distance was not
 measured for that run.
+
+### Depth exposure controls
+
+Static inspection of the distributed SDK and its public headers identifies
+register `0x911` as manual depth exposure in microseconds, `0x912` as the depth
+auto-exposure mode, and `0x910` as frame time. The public viewer sets frame time
+to exposure plus 2,000 microseconds before setting manual exposure. The four
+documented automatic values are off (0), fixed frame time (1), high quality
+(2), and foreground priority (3). The network camera accepts the same register
+writes through its existing `system_cmd` CGI endpoint.
+
+The POP 3 used for live validation reported a manual exposure range of
+5,000–65,000 microseconds in one-microsecond steps. A scanning-spray trial made
+the need for explicit control visible: inherited state yielded only 73 colored
+points and almost completely white infrared frames. Setting 7,000 microseconds
+raised scanner-computed valid depth to 16,910 pixels; setting the reported
+5,000-microsecond minimum raised it to 45,249 pixels, and the paired RGB-D path
+exported 45,038 colored points with a 21 ms timestamp delta. Foreground auto
+exposure retained essentially the same result (45,329 valid pixels). These are
+acquisition-yield observations, not geometric-accuracy qualification.
+
+The Rust API models these controls as enums and validated values. Capture CLI
+paths explicitly select foreground auto exposure unless the caller supplies a
+manual exposure or another auto mode, eliminating dependence on whatever a
+previous client left in persistent camera state.
+
+The completed Rust path was then exercised directly, without an external
+`curl` setup step. An explicit 5,000-microsecond RGB-D capture produced 72,684
+colored points. A subsequent default foreground-auto capture produced 102,121
+colored points with a 24 ms paired timestamp delta. This validates that both
+manual and default automatic controls are applied inside acquisition.

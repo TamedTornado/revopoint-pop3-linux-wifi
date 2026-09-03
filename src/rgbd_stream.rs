@@ -1,3 +1,4 @@
+use crate::camera_control::{set_depth_control, DepthControl, DepthControlError};
 use crate::http_stream::{get_bounded_body, get_chunked_until, StreamError, StreamLimits};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -39,6 +40,7 @@ pub enum RgbdStreamError {
     },
     Rejected(&'static str),
     WorkerPanicked,
+    Control(DepthControlError),
 }
 
 impl Display for RgbdStreamError {
@@ -47,6 +49,7 @@ impl Display for RgbdStreamError {
             Self::Http { stage, source } => write!(formatter, "{stage}: {source}"),
             Self::Rejected(stage) => write!(formatter, "scanner rejected {stage}"),
             Self::WorkerPanicked => formatter.write_str("RGB-D capture worker panicked"),
+            Self::Control(error) => Display::fmt(error, formatter),
         }
     }
 }
@@ -55,6 +58,7 @@ impl Error for RgbdStreamError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Http { source, .. } => Some(source),
+            Self::Control(error) => Some(error),
             Self::Rejected(_) | Self::WorkerPanicked => None,
         }
     }
@@ -70,7 +74,35 @@ where
     DepthReceive: FnMut(&[u8]) -> bool + Send,
     RgbReceive: FnMut(&[u8]) -> bool + Send,
 {
-    if let Err(error) = configure(address, limits) {
+    capture_rgbd_until_inner(address, limits, None, depth_receive, rgb_receive)
+}
+
+pub fn capture_rgbd_until_with_control<DepthReceive, RgbReceive>(
+    address: SocketAddr,
+    limits: StreamLimits,
+    control: DepthControl,
+    depth_receive: DepthReceive,
+    rgb_receive: RgbReceive,
+) -> Result<(usize, usize), RgbdStreamError>
+where
+    DepthReceive: FnMut(&[u8]) -> bool + Send,
+    RgbReceive: FnMut(&[u8]) -> bool + Send,
+{
+    capture_rgbd_until_inner(address, limits, Some(control), depth_receive, rgb_receive)
+}
+
+fn capture_rgbd_until_inner<DepthReceive, RgbReceive>(
+    address: SocketAddr,
+    limits: StreamLimits,
+    control: Option<DepthControl>,
+    depth_receive: DepthReceive,
+    rgb_receive: RgbReceive,
+) -> Result<(usize, usize), RgbdStreamError>
+where
+    DepthReceive: FnMut(&[u8]) -> bool + Send,
+    RgbReceive: FnMut(&[u8]) -> bool + Send,
+{
+    if let Err(error) = configure(address, limits, control) {
         let _ = shutdown(address, limits);
         return Err(error);
     }
@@ -134,7 +166,11 @@ fn both_complete(own: bool, peer: bool) -> bool {
     own && peer
 }
 
-fn configure(address: SocketAddr, limits: StreamLimits) -> Result<(), RgbdStreamError> {
+fn configure(
+    address: SocketAddr,
+    limits: StreamLimits,
+    control: Option<DepthControl>,
+) -> Result<(), RgbdStreamError> {
     result_control(address, limits, CLOSE_STREAMS, "close existing streams")?;
     result_control(
         address,
@@ -163,6 +199,9 @@ fn configure(address: SocketAddr, limits: StreamLimits) -> Result<(), RgbdStream
         SET_FREE_RUNNING_TRIGGER,
         "configure free-running trigger",
     )?;
+    if let Some(control) = control {
+        set_depth_control(address, limits, control).map_err(RgbdStreamError::Control)?;
+    }
     ok_control(address, limits, LED_MASTER_ON, "enable LED master")?;
     ok_control(address, limits, LED_IR_ON, "enable infrared projector")?;
     ok_control(address, limits, RGB_ENABLE, "enable RGB sensor")?;

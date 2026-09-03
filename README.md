@@ -141,6 +141,28 @@ zero remains invalid. The command reports robust median, MAD, and p10–p90 dept
 statistics so a measured planar target can be checked without trusting a
 picture alone.
 
+Depth capture no longer inherits an arbitrary exposure left behind by another
+client. By default, `--smoke-pair`, `--smoke-depth`, `--smoke-rgbd`, and
+`--capture-turntable` select the scanner's foreground-priority auto-exposure
+mode before enabling the projector. The typed control API and CLI also expose
+the manual and automatic controls recovered from the vendor SDK:
+
+```sh
+cargo run --release -- --depth-controls 192.168.8.245
+cargo run --release -- --set-depth-auto-exposure 192.168.8.245 high-quality
+cargo run --release -- --set-depth-exposure 192.168.8.245 5000
+cargo run --release -- --smoke-rgbd 192.168.8.245 /tmp/pop3 \
+  --depth-exposure 5000
+```
+
+Supported automatic modes are `off`, `fixed-frame-time`, `high-quality`, and
+`foreground`. A manual exposure is checked against the range reported by that
+scanner. The driver disables automatic exposure and, following the public SDK,
+sets frame time to exposure plus 2,000 microseconds before applying the manual
+value. Control writes require the firmware's `[ok]` acknowledgement. The
+capture option can also be `--depth-auto-exposure MODE`; explicit settings are
+applied as part of capture rather than relying on persistent device state.
+
 The first turntable prerequisite—independent RGB acquisition—is also available:
 
 ```sh
@@ -224,7 +246,7 @@ Offline network-boundary tests use loopback fixture servers and require no
 scanner:
 
 ```sh
-cargo test --test http_stream --test depth_capture
+cargo test --test http_stream --test depth_capture --test camera_control
 ```
 
 The repository retains separately tested Z16 decoding, calibration, ROS

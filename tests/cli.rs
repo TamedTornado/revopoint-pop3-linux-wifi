@@ -19,6 +19,10 @@ fn help_is_available_without_scanner_hardware() {
     assert!(stdout.contains("--replay-archive"));
     assert!(stdout.contains("--capture-turntable"));
     assert!(stdout.contains("--inspect-rgb-calibration"));
+    assert!(stdout.contains("--depth-controls"));
+    assert!(stdout.contains("--set-depth-exposure"));
+    assert!(stdout.contains("--set-depth-auto-exposure"));
+    assert!(stdout.contains("--depth-auto-exposure"));
     assert!(!stdout.contains("--measure-plane"));
     assert!(stdout.contains("--ros2-depth"));
     assert!(stdout.contains("experimental"));

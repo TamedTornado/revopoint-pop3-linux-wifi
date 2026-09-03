@@ -1,3 +1,4 @@
+use crate::camera_control::{set_depth_control, DepthControl, DepthControlError};
 use crate::http_stream::{get_bounded_body, get_chunked_prefix, StreamError, StreamLimits};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -154,6 +155,7 @@ pub enum DepthStreamError {
     InvalidResolution(DepthResolutionError),
     InvalidScale(DepthScaleError),
     RejectedEmitter(&'static str),
+    Control(DepthControlError),
 }
 
 impl Display for DepthStreamError {
@@ -167,6 +169,7 @@ impl Display for DepthStreamError {
             Self::InvalidResolution(error) => Display::fmt(error, formatter),
             Self::InvalidScale(error) => Display::fmt(error, formatter),
             Self::RejectedEmitter(stage) => write!(formatter, "scanner rejected {stage}"),
+            Self::Control(error) => Display::fmt(error, formatter),
         }
     }
 }
@@ -178,6 +181,7 @@ impl Error for DepthStreamError {
             Self::RejectedProfile | Self::RejectedConfiguration => None,
             Self::InvalidResolution(error) => Some(error),
             Self::InvalidScale(error) => Some(error),
+            Self::Control(error) => Some(error),
             Self::RejectedEmitter(_) => None,
         }
     }
@@ -189,6 +193,27 @@ pub fn capture_depth_prefix(
     prefix_bytes: usize,
     receive: impl FnMut(&[u8]),
 ) -> Result<usize, DepthStreamError> {
+    get_bounded_body(address, CLOSE_STREAMS, limits).map_err(|source| DepthStreamError::Http {
+        stage: "close existing streams",
+        source,
+    })?;
+    capture_prefix(
+        address,
+        limits,
+        prefix_bytes,
+        None,
+        receive,
+        Z16Y8Y8_CAPTURE,
+    )
+}
+
+pub fn capture_depth_prefix_with_control(
+    address: SocketAddr,
+    limits: StreamLimits,
+    prefix_bytes: usize,
+    control: DepthControl,
+    receive: impl FnMut(&[u8]),
+) -> Result<usize, DepthStreamError> {
     // The vendor SDK closes any existing camera stream before changing the
     // Z16Y8Y8 display profile. Without this reset the firmware accepts the
     // selector but leaves camera 21 silent.
@@ -196,7 +221,14 @@ pub fn capture_depth_prefix(
         stage: "close existing streams",
         source,
     })?;
-    capture_prefix(address, limits, prefix_bytes, receive, Z16Y8Y8_CAPTURE)
+    capture_prefix(
+        address,
+        limits,
+        prefix_bytes,
+        Some(control),
+        receive,
+        Z16Y8Y8_CAPTURE,
+    )
 }
 
 pub fn get_current_depth_resolution(
@@ -231,13 +263,31 @@ pub fn capture_pair_prefix(
     prefix_bytes: usize,
     receive: impl FnMut(&[u8]),
 ) -> Result<usize, DepthStreamError> {
-    capture_prefix(address, limits, prefix_bytes, receive, PAIR_CAPTURE)
+    capture_prefix(address, limits, prefix_bytes, None, receive, PAIR_CAPTURE)
+}
+
+pub fn capture_pair_prefix_with_control(
+    address: SocketAddr,
+    limits: StreamLimits,
+    prefix_bytes: usize,
+    control: DepthControl,
+    receive: impl FnMut(&[u8]),
+) -> Result<usize, DepthStreamError> {
+    capture_prefix(
+        address,
+        limits,
+        prefix_bytes,
+        Some(control),
+        receive,
+        PAIR_CAPTURE,
+    )
 }
 
 fn capture_prefix(
     address: SocketAddr,
     limits: StreamLimits,
     prefix_bytes: usize,
+    control: Option<DepthControl>,
     receive: impl FnMut(&[u8]),
     profile: CaptureProfile,
 ) -> Result<usize, DepthStreamError> {
@@ -288,6 +338,10 @@ fn capture_prefix(
         if trim_ascii_whitespace(&trigger) != br#"{"result":0}"# {
             return Err(DepthStreamError::RejectedConfiguration);
         }
+    }
+
+    if let Some(control) = control {
+        set_depth_control(address, limits, control).map_err(DepthStreamError::Control)?;
     }
 
     set_emitter(address, limits, LED_MASTER_ON, "enable LED master")?;

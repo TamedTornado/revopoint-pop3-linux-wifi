@@ -16,6 +16,7 @@
     "hardware_depth_z16_pass": true,
     "hardware_rgb_jpeg_pass": true,
     "hardware_rgb_calibration_pass": true,
+    "hardware_depth_controls_pass": true,
     "hardware_concurrent_rgbd_transport_pass": true,
     "ros_depth_camera_pass": true,
     "rviz_live_acceptance_pass": false
@@ -59,7 +60,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the PAIR and RGB/JPEG decoders, RGB controls, RGB calibration parser, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, normalized global-shift diagnostic, map/Q parser/full reprojection, metric Z16/PGM, and robust depth-statistics focused sets catch all viable mutants exercised. The initial RGB set caught 40 mutants with two timeout-killed and two unviable, with none missed. The RGB calibration set caught 78 mutants with five unviable and none missed. The concurrent RGB-D transport set caught 14 mutants with one timeout-killed and one unviable, with none missed. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
+      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the PAIR and RGB/JPEG decoders, RGB controls, RGB calibration parser, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, normalized global-shift diagnostic, map/Q parser/full reprojection, metric Z16/PGM, and robust depth-statistics focused sets catch all viable mutants exercised. The typed depth-control set tested 48 mutants: 45 caught, three unviable, none missed or timed out. The initial RGB set caught 40 mutants with two timeout-killed and two unviable, with none missed. The RGB calibration set caught 78 mutants with five unviable and none missed. The concurrent RGB-D transport set caught 14 mutants with one timeout-killed and one unviable, with none missed. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -84,6 +85,14 @@
       "command": "cargo run --release -- --smoke-depth SCANNER_IP OUTPUT_PREFIX",
       "status": "PASS",
       "claim": "Selector 3 yielded a 1024000-byte Z16Y8Y8 frame: explicit 640x400 little-endian Z16 plus two Y8 planes. A live wall run had 64.0% nonzero depth, 167.8 mm median, 1.5 mm MAD, and 165.0-170.7 mm p10-p90 at the queried 0.1 mm scale"
+    },
+    {
+      "id": "hardware-depth-controls",
+      "tier": "hardware",
+      "environment": "POP 3 Plus on reachable LAN with scanning-sprayed target",
+      "command": "cargo run --release -- --smoke-rgbd SCANNER_IP OUTPUT_PREFIX --depth-exposure 5000",
+      "status": "PASS",
+      "claim": "The typed Rust control path queried the live 5000-65000 us range, disabled automatic exposure, set frame time and 5000 us exposure through vendor-verified registers, required acknowledgements, and captured 72684 colored points without curl or inherited state. The default foreground auto-exposure path then captured 102121 colored points with a 24 ms RGB-D timestamp delta."
     },
     {
       "id": "hardware-rgb",

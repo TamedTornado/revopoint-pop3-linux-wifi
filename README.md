@@ -183,7 +183,7 @@ source /opt/ros/jazzy/setup.bash
 cargo run --release --features ros2 -- --ros2-depth 192.168.8.245
 ```
 
-The bounded command publishes 20 reconstructed `32FC1` frames and matching
+The bounded command publishes 20 scanner-computed `32FC1` frames and matching
 camera information on `/depth/image_rect` and `/depth/camera_info`. In separate
 terminals, stock ROS tooling can derive the organized cloud and display both:
 
@@ -196,12 +196,12 @@ ros2 run tf2_ros static_transform_publisher --frame-id world \
 rviz2 -d config/pop3-depth.rviz
 ```
 
-A real-hardware run delivered all 20 frames, a ROS subscriber observed image
-width 640, stock `depth_image_proc` emitted a 640-wide `PointCloud2`, and RViz2
-displayed both the reconstructed depth image and cloud. The roughly planar wall
-appeared as sparse separated lobes rather than an accepted plane. This verifies
-the complete plumbing and gives us a useful visual failure, not geometric
-accuracy or acceptance.
+A real-hardware direct-depth run delivered all 20 frames, a ROS subscriber
+observed image width 640, and stock `depth_image_proc` emitted a 640-wide
+`PointCloud2`. RViz2 launched with the supplied configuration and subscribed to
+the live cloud; Wayland denied automated screenshot capture, so the direct-depth
+visual geometry cell remains unaccepted. This verifies the automated plumbing,
+not metrology or visual plane accuracy.
 
 ## Important limitations
 

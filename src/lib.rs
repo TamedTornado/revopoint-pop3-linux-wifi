@@ -614,8 +614,6 @@ fn ros2_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     const BATCHES: usize = 20;
     let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
     let limits = network_limits();
-    let maps = stereo_calibration::get_stereo_map_parameters(address, limits)?;
-    let reprojection = stereo_calibration::get_reprojection_matrix(address, limits)?;
     let intrinsics =
         calibration::get_depth_intrinsics(address, limits)?.for_resolution(640, 400)?;
     let context = rclrs::Context::default();
@@ -623,22 +621,21 @@ fn ros2_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     let node = executor.create_node("revopoint_pop3_depth")?;
     let publisher = ros2_adapter::Ros2CameraPublisher::new(&node)?;
     println!(
-        "Publishing {BATCHES} experimental reconstructed frames on depth/image_rect and depth/camera_info"
+        "Publishing {BATCHES} scanner-computed depth frames on depth/image_rect and depth/camera_info"
     );
     thread::sleep(Duration::from_secs(1));
 
     for batch in 0..BATCHES {
-        let (_, pair) = capture_pair_frame(address, limits)?;
-        let reconstructed = reconstruct_pair(&pair, maps, reprojection)?;
+        let (_, direct) = capture_depth_frame(address, limits)?;
         let frame = ros_camera::map_depth_camera(
-            reconstructed.depth,
+            direct.depth,
             intrinsics,
             current_ros_time()?,
             "pop3_depth_optical_frame",
         )?;
         publisher.publish(frame)?;
         println!(
-            "published experimental reconstructed frame {}/{BATCHES}",
+            "published scanner-computed depth frame {}/{BATCHES}",
             batch + 1
         );
     }

@@ -13,8 +13,8 @@
     "experimental_depth_image_proc_pass": true,
     "experimental_rviz_depth_image_pass": true,
     "experimental_rviz_cloud_display_pass": true,
-    "hardware_depth_z16_pass": false,
-    "ros_depth_camera_pass": false,
+    "hardware_depth_z16_pass": true,
+    "ros_depth_camera_pass": true,
     "rviz_live_acceptance_pass": false
   },
   "cells": [
@@ -75,28 +75,36 @@
       "claim": "The Rust client recovered and QuickLZ-decompressed complete bounded envelopes; each 512000-byte frame splits into contiguous 640x400 left and right Y8 planes, and the emitted PGM images visibly contain the physical target"
     },
     {
+      "id": "hardware-direct-depth",
+      "tier": "hardware",
+      "environment": "POP 3 Plus on reachable LAN",
+      "command": "cargo run --release -- --smoke-depth SCANNER_IP OUTPUT_PREFIX",
+      "status": "PASS",
+      "claim": "Selector 3 yielded a 1024000-byte Z16Y8Y8 frame: explicit 640x400 little-endian Z16 plus two Y8 planes. A live wall run had 64.0% nonzero depth, 167.8 mm median, 1.5 mm MAD, and 165.0-170.7 mm p10-p90 at the queried 0.1 mm scale"
+    },
+    {
       "id": "metric-depth",
       "tier": "hardware",
       "environment": "POP 3 Plus and measured physical targets",
       "command": "not available",
       "status": "PARTIAL",
-      "claim": "Clean-room rectification, bounded SAD disparity, uniqueness, left/right consistency, spatial consensus/median filtering, and Q reprojection run end-to-end; a live wall capture retained 14.7% of pixels with median 263 mm, MAD 9 mm, and p10-p90 234-272 mm, which quantifies rather than clears the planar failure"
+      "claim": "Scanner-computed depth now passes acquisition and layout checks, with a live 167.8 mm wall median and 1.5 mm MAD. Absolute accuracy remains unqualified because that target was only estimated at 150-300 mm rather than measured; clean-room PAIR reconstruction remains a separate diagnostic"
     },
     {
       "id": "ros-contract",
       "tier": "ros-integration",
       "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
       "command": "cargo test --features ros2 --test ros2_dynamic_messages",
-      "status": "PARTIAL",
-      "claim": "Offline runtime message construction passes; corrected live publication delivered 20 reconstructed frames and a subscriber observed a 640-wide 32FC1 image, but the reconstructed metric plane remains unqualified"
+      "status": "PASS",
+      "claim": "Offline runtime message construction passes; live publication delivered 20 scanner-computed depth frames and a real subscriber observed a 640-wide 32FC1 image with matching CameraInfo publication"
     },
     {
       "id": "depth-image-proc",
       "tier": "ros-integration",
       "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
       "command": "ros2 run depth_image_proc point_cloud_xyz_node --ros-args -r image_rect:=/depth/image_rect -r camera_info:=/depth/camera_info",
-      "status": "PARTIAL",
-      "claim": "Stock depth_image_proc emitted a 640-wide organized PointCloud2 from corrected reconstructed depth and RViz2 displayed it; the wall appeared as sparse separated lobes, so visual plane geometry and measured-target accuracy remain unaccepted"
+      "status": "PASS",
+      "claim": "Stock depth_image_proc emitted a 640-wide organized PointCloud2 from scanner-computed depth and an independent ROS subscriber received it; visual geometry and measured-target accuracy are tracked separately"
     },
     {
       "id": "rviz-hardware",
@@ -104,7 +112,7 @@
       "environment": "POP 3 Plus, turntable, ROS 2 Jazzy, RViz2",
       "command": "rviz2 -d config/pop3-depth.rviz",
       "status": "PARTIAL",
-      "claim": "RViz2 displayed the corrected live reconstructed depth image and point cloud with a static optical-frame transform; the sparse separated cloud failed the planar-wall geometry check and measured-target acceptance remains open"
+      "claim": "RViz2 launched with the supplied configuration and subscribed to the scanner-computed live cloud with a static optical-frame transform. Wayland denied automated screenshot capture, so direct-depth visual geometry and measured-target acceptance remain open"
     }
   ]
 }

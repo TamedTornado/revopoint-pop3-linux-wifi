@@ -134,10 +134,10 @@ Add a feature-gated Rust ROS 2 Jazzy adapter publishing synchronized
 `sensor_msgs/Image` and `sensor_msgs/CameraInfo` messages with sensor-data QoS.
 Test exact message fields using a real ROS subscriber boundary.
 
-The offline Z16-to-ROS mapping contract remains tested. Live publication is now
-restored only for the independently reconstructed plane and is labelled
-experimental. A bounded hardware run published all 20 requested frames; a real
-ROS subscriber received a 640-wide `32FC1` image. This validates the live
+The offline Z16-to-ROS mapping contract remains tested. Live publication now
+uses the scanner-computed Z16Y8Y8 plane rather than the experimental PAIR
+reconstruction. A bounded hardware run published all 20 requested frames; a
+real ROS subscriber received a 640-wide `32FC1` image. This validates the live
 message boundary but not metric accuracy.
 
 ### 7. Qualify the stock Linux application path ([#7](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/7))

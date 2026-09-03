@@ -96,15 +96,18 @@ and a 3×3 inverse rectification transform. Applying those records to a live
 A whole-image horizontal comparison of the rectified wall target had its lowest
 error at approximately 14–15 half-resolution pixels, providing an independent
 sanity check that the epipolar direction is horizontal. Per-pixel SAD disparity
-is now emitted for diagnosis but remains visibly noisy on the nearly planar,
-low-texture target and is not treated as qualified depth.
+is filtered by a best-versus-runner-up cost margin, checked against a reverse
+right-to-left match, and emitted for diagnosis. The nearly planar, low-texture
+target remains a deliberately difficult case and the output is not treated as
+qualified depth.
 
 The accompanying 4×4 Q record follows the standard homogeneous reprojection
 shape. Scaling half-resolution disparity back to calibration resolution and
-dividing Q's Z numerator by its homogeneous W term produced a 250.5 mm median
-on a live wall capture whose physical distance was estimated only as 150–300
-mm. The broad agreement supports the interpretation but is intentionally not a
-metric acceptance result.
+dividing Q's Z numerator by its homogeneous W term produced a 259.8 mm median
+after provisional uniqueness and consistency filtering. That run retained
+53,113 of 256,000 pixels (20.7%); the wall's physical distance was estimated
+only as 150–300 mm. The broad agreement supports the interpretation but is
+intentionally not a metric acceptance result.
 
 The scanner's read-only `get_depth_reso` endpoint reports `curr-resolution` as
 `640x400x2`. That is also the total byte count for two Y8 planes: 512,000 bytes.

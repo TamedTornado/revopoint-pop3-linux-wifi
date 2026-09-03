@@ -35,16 +35,16 @@ capture an exact byte count from its chunked HTTP media stream, recover bounded
 frame envelopes, decompress their QuickLZ payloads in Rust, and split each
 640x400 frame into contiguous left and right Y8 infrared images.
 
-Metric depth is **not yet acquired**. Hardware tests disproved an earlier
+Metric depth is **not yet qualified**. Hardware tests disproved an earlier
 interpretation of selector 1 as Z16: those bytes are the two Y8 images described
 by the public SDK's `PAIR` layout. Treating adjacent bytes as little-endian
 depth created a plausible-looking but false point cloud. The CLI therefore no
 longer exposes the earlier depth/ROS commands, and the library's depth-capture
 entry point fails closed until host-side reconstruction is implemented.
 Binary inspection now confirms that RevoScan itself requests `PAIR` from the
-camera and derives depth later in its host-side processing pipeline. The next
-implementation boundary is therefore stereo reconstruction, not another
-firmware-selector experiment.
+camera and derives depth later in its host-side processing pipeline. Clean-room
+rectification, correspondence, and reprojection now run end-to-end, but the
+result remains experimental until measured-target validation succeeds.
 
 ## Build
 
@@ -122,12 +122,13 @@ off again on success or failure.
 Example output:
 
 ```text
-PAIR stream smoke passed: bytes=1048576, resolution=640x400, left=/tmp/pop3-left.pgm, right=/tmp/pop3-right.pgm, left_rectified=/tmp/pop3-left-rectified.pgm, right_rectified=/tmp/pop3-right-rectified.pgm, disparity=/tmp/pop3-disparity.pgm, median_disparity_px=..., experimental_median_depth_mm=...
+PAIR stream smoke passed: bytes=1048576, resolution=640x400, left=/tmp/pop3-left.pgm, right=/tmp/pop3-right.pgm, left_rectified=/tmp/pop3-left-rectified.pgm, right_rectified=/tmp/pop3-right-rectified.pgm, disparity=/tmp/pop3-disparity.pgm, valid_pixels=... (...%), median_disparity_px=..., experimental_median_depth_mm=...
 ```
 
 The disparity image is currently a diagnostic, not qualified metric depth. It
-uses a bounded 0–160 pixel search and a 15×15 SAD support window. Occlusion,
-confidence, left/right consistency, and physical scale validation remain open.
+uses a bounded 0–160 pixel search, a 15×15 SAD support window, a provisional 1%
+best-versus-runner-up cost margin, and a one-pixel left/right consistency check.
+Occlusion-aware filling and physical scale validation remain open.
 The reported depth applies the scanner's read-only Q reprojection matrix to the
 median disparity, including the calibration-to-stream resolution scale. It is
 labelled experimental until the noisy per-pixel result and a measured target
@@ -156,8 +157,9 @@ The independently established envelope is documented in
   utility reattaches it before exiting.
 - Only `2207:110c` is accepted. Other Revopoint products may use a related
   protocol, but they are deliberately not targeted without hardware testing.
-- Live Z16/depth reconstruction is not yet implemented. Current LAN acquisition
-  yields the scanner's two Y8 infrared images only.
+- Live stereo depth reconstruction is experimental and not yet physically
+  qualified. Current LAN acquisition yields the scanner's two Y8 infrared
+  images plus diagnostic rectification, disparity, and median-depth outputs.
 
 ## How it works
 

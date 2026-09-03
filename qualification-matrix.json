@@ -76,7 +76,7 @@
       "environment": "POP 3 Plus and measured physical targets",
       "command": "not available",
       "status": "PARTIAL",
-      "claim": "Clean-room rectification, bounded SAD disparity, and Q reprojection run end-to-end; a live wall capture reported an experimental 250.5 mm median within the target's rough 150-300 mm placement, but confidence filtering and measured-target accuracy remain open"
+      "claim": "Clean-room rectification, bounded SAD disparity, provisional uniqueness and left/right consistency filtering, and Q reprojection run end-to-end; a live wall capture retained 20.7% of pixels and reported an experimental 259.8 mm median within the target's rough 150-300 mm placement, but measured-target accuracy remains open"
     },
     {
       "id": "ros-contract",

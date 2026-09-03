@@ -1,5 +1,7 @@
 use revopoint_pop3_wifi::stereo_match::{
-    block_match_y8, encode_disparity_pgm, DisparityError, DisparityMap,
+    block_match_y8, block_match_y8_consistent, block_match_y8_unique, costs_have_minimum_margin,
+    encode_disparity_pgm, enforce_left_right_consistency, ConsistentMatchParameters,
+    DisparityError, DisparityMap,
 };
 
 #[test]
@@ -27,6 +29,106 @@ fn recovers_a_known_horizontal_shift() {
 }
 
 #[test]
+fn rejects_disparities_that_do_not_survive_the_reverse_match() {
+    let invalid = u16::MAX;
+    let left_to_right = DisparityMap {
+        width: 6,
+        height: 1,
+        values: vec![invalid, 2, 2, 2, 1, 0],
+    };
+    let right_to_left = DisparityMap {
+        width: 6,
+        height: 1,
+        values: vec![2, 3, invalid, 1, invalid, invalid],
+    };
+
+    let exact =
+        enforce_left_right_consistency(&left_to_right, &right_to_left, 0).expect("consistent map");
+    assert_eq!(exact.values, vec![invalid, invalid, 2, invalid, 1, invalid]);
+
+    let tolerant =
+        enforce_left_right_consistency(&left_to_right, &right_to_left, 1).expect("tolerant map");
+    assert_eq!(tolerant.at(3, 0), Some(2));
+}
+
+#[test]
+fn bidirectional_match_retains_a_known_shift() {
+    let width = 32_u32;
+    let height = 9_u32;
+    let shift = 4_usize;
+    let left = (0..width as usize * height as usize)
+        .map(|index| ((index * 37 + index / width as usize * 19) % 251) as u8)
+        .collect::<Vec<_>>();
+    let mut right = vec![0_u8; left.len()];
+    for y in 0..height as usize {
+        for x in 0..width as usize - shift {
+            right[y * width as usize + x] = left[y * width as usize + x + shift];
+        }
+    }
+
+    let map = block_match_y8_consistent(
+        &left,
+        &right,
+        width,
+        height,
+        ConsistentMatchParameters {
+            disparities: 0..=8,
+            radius: 1,
+            minimum_margin_percent: 10,
+            consistency_tolerance: 0,
+        },
+    )
+    .expect("consistent disparity map");
+
+    for y in 1..height - 1 {
+        for x in 9..width - 5 {
+            assert_eq!(map.at(x, y), Some(4), "pixel ({x},{y})");
+        }
+    }
+}
+
+#[test]
+fn consistency_rejects_incompatible_maps() {
+    let valid = DisparityMap {
+        width: 2,
+        height: 1,
+        values: vec![0, 0],
+    };
+    let wrong_dimensions = DisparityMap {
+        width: 1,
+        height: 2,
+        values: vec![0, 0],
+    };
+    let wrong_width = DisparityMap {
+        width: 1,
+        height: 1,
+        values: vec![0, 0],
+    };
+    let wrong_length = DisparityMap {
+        width: 2,
+        height: 1,
+        values: vec![0],
+    };
+
+    assert_eq!(
+        enforce_left_right_consistency(&valid, &wrong_dimensions, 0),
+        Err(DisparityError)
+    );
+    assert_eq!(
+        enforce_left_right_consistency(&valid, &wrong_width, 0),
+        Err(DisparityError)
+    );
+    assert_eq!(
+        enforce_left_right_consistency(&valid, &wrong_length, 0),
+        Err(DisparityError)
+    );
+    assert_eq!(
+        enforce_left_right_consistency(&wrong_length, &valid, 0),
+        Err(DisparityError)
+    );
+}
+
+#[test]
 fn marks_pixels_without_a_complete_search_window_invalid() {
     let image = vec![42_u8; 12 * 8];
     let map = block_match_y8(&image, &image, 12, 8, 0..=4, 2).expect("disparity map");
@@ -35,6 +137,48 @@ fn marks_pixels_without_a_complete_search_window_invalid() {
     assert_eq!(map.at(5, 3), Some(0));
     assert_eq!(map.at(12, 3), None);
     assert_eq!(map.at(5, 8), None);
+    assert_eq!(map.valid_count(), 32);
+}
+
+#[test]
+fn uniqueness_filter_rejects_an_ambiguous_flat_image() {
+    let image = vec![42_u8; 20 * 7];
+
+    let ordinary = block_match_y8(&image, &image, 20, 7, 0..=4, 1).expect("ordinary map");
+    let unique = block_match_y8_unique(&image, &image, 20, 7, 0..=4, 1, 10).expect("unique map");
+
+    assert_eq!(ordinary.at(8, 3), Some(0));
+    assert_eq!(unique.at(8, 3), None);
+}
+
+#[test]
+fn uniqueness_margin_includes_its_exact_boundary() {
+    assert!(costs_have_minimum_margin(100, 110, 10));
+    assert!(!costs_have_minimum_margin(100, 109, 10));
+    assert!(!costs_have_minimum_margin(100, 100, 10));
+    assert!(!costs_have_minimum_margin(100, 100, 0));
+    assert!(!costs_have_minimum_margin(100, u64::MAX, 10));
+}
+
+#[test]
+fn uniqueness_filter_retains_a_distinct_match() {
+    let width = 24_u32;
+    let height = 9_u32;
+    let shift = 3_usize;
+    let left = (0..width as usize * height as usize)
+        .map(|index| ((index * 37 + index / width as usize * 19) % 251) as u8)
+        .collect::<Vec<_>>();
+    let mut right = vec![0_u8; left.len()];
+    for y in 0..height as usize {
+        for x in 0..width as usize - shift {
+            right[y * width as usize + x] = left[y * width as usize + x + shift];
+        }
+    }
+
+    let map =
+        block_match_y8_unique(&left, &right, width, height, 0..=6, 1, 10).expect("unique map");
+
+    assert_eq!(map.at(10, 4), Some(3));
 }
 
 #[test]
@@ -77,6 +221,19 @@ fn optimized_costs_match_a_direct_reference_implementation() {
     let expected = direct_match(&left, &right, width as usize, height as usize, 1, 4, 2);
 
     assert_eq!(actual.values, expected);
+
+    let actual_unique = block_match_y8_unique(&left, &right, width, height, 1..=4, 2, 25)
+        .expect("optimized unique disparity map");
+    let expected_unique = direct_match_unique(
+        &left,
+        &right,
+        (width as usize, height as usize),
+        1..=4,
+        2,
+        25,
+    );
+    assert_eq!(actual_unique.values, expected_unique);
+    assert!(block_match_y8_unique(&left, &right, width, height, 1..=4, 2, 0).is_err());
 }
 
 fn direct_match(
@@ -111,6 +268,47 @@ fn direct_match(
             }
             if let Some((_, disparity)) = best {
                 output[y * width + x] = disparity as u16;
+            }
+        }
+    }
+    output
+}
+
+fn direct_match_unique(
+    left: &[u8],
+    right: &[u8],
+    dimensions: (usize, usize),
+    disparities: std::ops::RangeInclusive<usize>,
+    radius: usize,
+    minimum_margin_percent: u16,
+) -> Vec<u16> {
+    let (width, height) = dimensions;
+    let mut output = vec![u16::MAX; width * height];
+    for y in radius..height - radius {
+        for x in radius..width - radius {
+            let mut candidates = Vec::new();
+            for disparity in disparities.clone() {
+                if x < disparity + radius {
+                    continue;
+                }
+                let mut cost = 0_u64;
+                for window_y in y - radius..=y + radius {
+                    for window_x in x - radius..=x + radius {
+                        cost += u64::from(
+                            left[window_y * width + window_x]
+                                .abs_diff(right[window_y * width + window_x - disparity]),
+                        );
+                    }
+                }
+                candidates.push((cost, disparity));
+            }
+            candidates.sort_by_key(|candidate| candidate.0);
+            let [best, second, ..] = candidates.as_slice() else {
+                continue;
+            };
+            let required_margin = u128::from(best.0.max(1)) * u128::from(minimum_margin_percent);
+            if second.0 > best.0 && u128::from(second.0 - best.0) * 100 >= required_margin {
+                output[y * width + x] = best.1 as u16;
             }
         }
     }

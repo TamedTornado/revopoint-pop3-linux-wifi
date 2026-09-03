@@ -356,6 +356,7 @@ fn run(write: bool, diagnose: bool) -> Result<(), Box<dyn Error>> {
 fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     const PREFIX_BYTES: usize = 1024 * 1024;
     const MAXIMUM_DISPARITY: u16 = 160;
+    const MINIMUM_MATCH_MARGIN_PERCENT: u16 = 1;
     let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
     let limits = http_stream::StreamLimits {
         connect_timeout: Duration::from_secs(3),
@@ -399,13 +400,17 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         stereo_calibration::rectify_y8(&pair.left, pair.width, pair.height, maps.left)?;
     let right_rectified =
         stereo_calibration::rectify_y8(&pair.right, pair.width, pair.height, maps.right)?;
-    let disparity = stereo_match::block_match_y8(
+    let disparity = stereo_match::block_match_y8_consistent(
         &left_rectified,
         &right_rectified,
         pair.width,
         pair.height,
-        0..=MAXIMUM_DISPARITY,
-        7,
+        stereo_match::ConsistentMatchParameters {
+            disparities: 0..=MAXIMUM_DISPARITY,
+            radius: 7,
+            minimum_margin_percent: MINIMUM_MATCH_MARGIN_PERCENT,
+            consistency_tolerance: 1,
+        },
     )?;
     let mut valid_disparities = disparity
         .values
@@ -429,6 +434,8 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     let left_rectified_path = format!("{output_prefix}-left-rectified.pgm");
     let right_rectified_path = format!("{output_prefix}-right-rectified.pgm");
     let disparity_path = format!("{output_prefix}-disparity.pgm");
+    let valid_pixels = disparity.valid_count();
+    let valid_percent = valid_pixels as f64 * 100.0 / disparity.values.len() as f64;
     std::fs::write(
         &left_path,
         pair_decode::encode_y8_pgm(pair.width, pair.height, &pair.left)?,
@@ -450,7 +457,7 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         stereo_match::encode_disparity_pgm(&disparity, MAXIMUM_DISPARITY)?,
     )?;
     println!(
-        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}, left_rectified={left_rectified_path}, right_rectified={right_rectified_path}, disparity={disparity_path}, median_disparity_px={median_disparity}, experimental_median_depth_mm={experimental_median_depth_mm:.1}",
+        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}, left_rectified={left_rectified_path}, right_rectified={right_rectified_path}, disparity={disparity_path}, valid_pixels={valid_pixels} ({valid_percent:.1}%), median_disparity_px={median_disparity}, experimental_median_depth_mm={experimental_median_depth_mm:.1}",
         pair.width, pair.height
     );
     Ok(())

@@ -96,6 +96,15 @@ decoded 1,024,000-byte frame splits exactly into 512,000 bytes of little-endian
 Z16 and two 256,000-byte Y8 planes. The acquisition path retains PAIR as a
 separate diagnostic mode rather than conflating its intensities with depth.
 
+The first 80 bytes of each decompressed depth buffer are a packed auxiliary
+record, not depth samples. Binary inspection established that the SDK copies
+that prefix out before zeroing it in the image buffer. Its little-endian device
+timestamp is at byte offset 20. Four consecutive saved frames contained
+208,743, 208,790, 208,837, and 208,884 ms: an exact 47 ms cadence. The Rust
+decoder now extracts that timestamp and likewise clears all 80 metadata bytes
+before exposing the Z16 plane, preserving the vendor's pixel indexing without
+mistaking metadata for the first 40 depth pixels.
+
 A usable PAIR image also requires both pre-ISP illumination controls: register
 `0xb00` enables the LED master and `0xb01` enables the infrared projector. With
 the selector configured but those controls off, frames were nearly black. With

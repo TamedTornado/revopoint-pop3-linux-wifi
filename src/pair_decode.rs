@@ -1,3 +1,4 @@
+use crate::depth_decode::extract_depth_extra_info;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
@@ -18,6 +19,7 @@ impl Error for PairDecodeError {}
 pub struct Y8Pair {
     pub width: u32,
     pub height: u32,
+    pub device_timestamp_ms: Option<u32>,
     pub left: Vec<u8>,
     pub right: Vec<u8>,
 }
@@ -53,9 +55,22 @@ pub fn decode_y8_pair(
     Ok(Y8Pair {
         width,
         height,
+        device_timestamp_ms: None,
         left,
         right,
     })
+}
+
+pub fn decode_wire_y8_pair(
+    mut bytes: Vec<u8>,
+    width: u32,
+    height: u32,
+) -> Result<Y8Pair, PairDecodeError> {
+    let timestamp =
+        extract_depth_extra_info(&mut bytes).map_err(|_| PairDecodeError::InvalidLayout)?;
+    let mut pair = decode_y8_pair(bytes, width, height)?;
+    pair.device_timestamp_ms = Some(timestamp);
+    Ok(pair)
 }
 
 pub fn encode_y8_pgm(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, PairDecodeError> {

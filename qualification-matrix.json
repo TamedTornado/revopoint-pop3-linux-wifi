@@ -107,7 +107,7 @@
       "environment": "POP 3 Plus on reachable LAN",
       "command": "cargo run --release -- --smoke-rgbd SCANNER_IP OUTPUT_PREFIX",
       "status": "PASS",
-      "claim": "The clean-room Rust command held camera 21 and camera 50 open until both parsers reached complete frame boundaries, recovered 647121 depth bytes and 115879 RGB bytes, and wrote visually checked 640x400 depth and 1280x800 RGB images. This qualifies concurrent transport, not paired-frame synchronization"
+      "claim": "The clean-room Rust command collected eight camera-21 depth and eight camera-50 RGB candidates, extracted both device-clock timestamps, selected the closest pair with RGB following depth inside a 50 ms bound, and wrote 640x400 depth and 1280x800 RGB images. A live run rejected a 171 ms startup-skewed first pair and then selected a 15 ms pair from the overlapping candidate windows"
     },
     {
       "id": "metric-depth",

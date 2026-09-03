@@ -164,10 +164,11 @@ writes an ordinary JPEG. A live smoke produced a recognizable 1280×800 wall
 image. A public Rust command now holds the depth and RGB endpoints open together
 until both have reached complete frame boundaries, then writes checkable depth
 PGM and RGB JPEG files. The path also downloads and validates RGB intrinsics,
-five distortion coefficients, and the left-depth-camera-to-RGB transform.
-These frames are concurrent but not yet paired. Pairing policy, registration,
-archive format, turntable angle metadata, masking, and dataset adapters remain
-open.
+five distortion coefficients, and the left-depth-camera-to-RGB transform. The
+driver now gathers eight candidates from each stream and selects the closest
+pair on their common device clock, with RGB required to follow depth within 50
+ms. Registration, archive format, turntable angle metadata, masking, and dataset
+adapters remain open.
 
 ## Red-green workflow
 

@@ -3,6 +3,9 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io::Cursor;
 
+const EXTRA_INFO_BYTES: usize = 80;
+const DEVICE_TIMESTAMP_OFFSET: usize = 20;
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct DecodedDepth {
     pub flags: u8,
@@ -28,6 +31,7 @@ pub struct DepthPlane {
 
 #[derive(Debug, PartialEq)]
 pub struct Z16Y8Y8Frame {
+    pub device_timestamp_ms: u32,
     pub depth: DepthPlane,
     pub left: Vec<u8>,
     pub right: Vec<u8>,
@@ -99,6 +103,7 @@ impl DecodedDepth {
         }
 
         let mut bytes = self.bytes;
+        let device_timestamp_ms = extract_depth_extra_info(&mut bytes)?;
         let right = bytes.split_off(depth_bytes + pixels);
         let left = bytes.split_off(depth_bytes);
         let depth = DecodedDepth {
@@ -110,7 +115,12 @@ impl DecodedDepth {
         }
         .into_z16_plane(width, height, millimeters_per_unit)?;
 
-        Ok(Z16Y8Y8Frame { depth, left, right })
+        Ok(Z16Y8Y8Frame {
+            device_timestamp_ms,
+            depth,
+            left,
+            right,
+        })
     }
 
     pub fn into_z16_plane(
@@ -147,6 +157,19 @@ impl DecodedDepth {
             bytes: self.bytes,
         })
     }
+}
+
+pub fn extract_depth_extra_info(bytes: &mut [u8]) -> Result<u32, DepthDecodeError> {
+    let extra_info = bytes
+        .get_mut(..EXTRA_INFO_BYTES)
+        .ok_or_else(|| fail("decoded depth frame is shorter than its extra-info prefix"))?;
+    let timestamp = u32::from_le_bytes(
+        extra_info[DEVICE_TIMESTAMP_OFFSET..DEVICE_TIMESTAMP_OFFSET + 4]
+            .try_into()
+            .expect("fixed depth timestamp field"),
+    );
+    extra_info.fill(0);
+    Ok(timestamp)
 }
 
 #[derive(Debug)]

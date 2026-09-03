@@ -15,6 +15,7 @@ pub mod pair_decode;
 pub mod rgb_calibration;
 pub mod rgb_decode;
 pub mod rgb_stream;
+pub mod rgbd_pair;
 pub mod rgbd_stream;
 #[cfg(feature = "ros2")]
 pub mod ros2_adapter;
@@ -392,7 +393,7 @@ fn capture_pair_frame(
                         match depth_decode::decode_quicklz(&frame, 2 * 1024 * 1024)
                             .map_err(|error| Box::new(error) as Box<dyn Error>)
                             .and_then(|decoded| {
-                                pair_decode::decode_y8_pair(decoded.bytes, 640, 400)
+                                pair_decode::decode_wire_y8_pair(decoded.bytes, 640, 400)
                                     .map_err(|error| Box::new(error) as Box<dyn Error>)
                             }) {
                             Ok(pair) => first_pair = Some(pair),
@@ -627,9 +628,10 @@ fn smoke_depth(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         pair_decode::encode_y8_pgm(frame.depth.width, frame.depth.height, &frame.right)?,
     )?;
     println!(
-        "Z16Y8Y8 stream smoke passed: bytes={received}, resolution={}x{}, scale_mm={}, depth={depth_path}, left={left_path}, right={right_path}, valid_pixels={} ({valid_percent:.1}%), min_raw={:?}, max_raw={}, mean_depth_mm={:?}, median_depth_mm={:.1}, depth_mad_mm={:.1}, depth_p10_p90_mm={:.1}..{:.1}",
+        "Z16Y8Y8 stream smoke passed: bytes={received}, resolution={}x{}, timestamp_ms={}, scale_mm={}, depth={depth_path}, left={left_path}, right={right_path}, valid_pixels={} ({valid_percent:.1}%), min_raw={:?}, max_raw={}, mean_depth_mm={:?}, median_depth_mm={:.1}, depth_mad_mm={:.1}, depth_p10_p90_mm={:.1}..{:.1}",
         frame.depth.width,
         frame.depth.height,
+        frame.device_timestamp_ms,
         frame.depth.millimeters_per_unit,
         statistics.nonzero_samples,
         statistics.minimum_nonzero_raw,
@@ -661,41 +663,51 @@ fn smoke_rgb(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
 }
 
 fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
+    const CANDIDATE_FRAMES: usize = 8;
+
     let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
-    let limits = network_limits();
+    let mut limits = network_limits();
+    limits.max_body_bytes = 8 * 1024 * 1024;
     let mut depth_parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
     let mut rgb_parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
-    let mut depth_envelope = None;
-    let mut rgb_frame = None;
+    let mut depth_envelopes = Vec::with_capacity(CANDIDATE_FRAMES);
+    let mut rgb_frames = Vec::with_capacity(CANDIDATE_FRAMES);
     let mut depth_error = None;
     let mut rgb_error = None;
     let (depth_received, rgb_received) = rgbd_stream::capture_rgbd_until(
         address,
         limits,
         |chunk| {
-            if depth_envelope.is_none() && depth_error.is_none() {
+            if depth_envelopes.len() < CANDIDATE_FRAMES && depth_error.is_none() {
                 match depth_parser.push(chunk) {
-                    Ok(frames) => depth_envelope = frames.into_iter().next(),
+                    Ok(frames) => depth_envelopes.extend(
+                        frames
+                            .into_iter()
+                            .take(CANDIDATE_FRAMES - depth_envelopes.len()),
+                    ),
                     Err(error) => depth_error = Some(error.to_string()),
                 }
             }
-            depth_envelope.is_some() || depth_error.is_some()
+            depth_envelopes.len() == CANDIDATE_FRAMES || depth_error.is_some()
         },
         |chunk| {
-            if rgb_frame.is_none() && rgb_error.is_none() {
+            if rgb_frames.len() < CANDIDATE_FRAMES && rgb_error.is_none() {
                 match rgb_parser.push(chunk) {
                     Ok(frames) => {
-                        if let Some(frame) = frames.into_iter().next() {
+                        for frame in frames.into_iter().take(CANDIDATE_FRAMES - rgb_frames.len()) {
                             match rgb_decode::inspect_jpeg(&frame.payload) {
-                                Ok(information) => rgb_frame = Some((frame.payload, information)),
-                                Err(error) => rgb_error = Some(error.to_string()),
+                                Ok(information) => rgb_frames.push((frame.payload, information)),
+                                Err(error) => {
+                                    rgb_error = Some(error.to_string());
+                                    break;
+                                }
                             }
                         }
                     }
                     Err(error) => rgb_error = Some(error.to_string()),
                 }
             }
-            rgb_frame.is_some() || rgb_error.is_some()
+            rgb_frames.len() == CANDIDATE_FRAMES || rgb_error.is_some()
         },
     )?;
     if let Some(error) = depth_error {
@@ -706,29 +718,56 @@ fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     }
     let scale = depth_stream::get_depth_scale_mm(address, limits)?;
     let calibration = rgb_calibration::get_rgb_calibration(address, limits)?;
-    let depth_envelope = depth_envelope
-        .ok_or_else(|| failure("bounded concurrent capture contained no complete depth frame"))?;
-    let depth = depth_decode::decode_quicklz(&depth_envelope, 640 * 400 * 4)?
-        .into_z16y8y8(640, 400, scale)?;
-    let (rgb_payload, rgb) = rgb_frame
-        .ok_or_else(|| failure("bounded concurrent capture contained no complete RGB frame"))?;
-    if rgb.width != 1280 || rgb.height != 800 || rgb.device_timestamp_ms.is_none() {
+    let mut depth_frames = depth_envelopes
+        .iter()
+        .map(|envelope| {
+            depth_decode::decode_quicklz(envelope, 640 * 400 * 4)?.into_z16y8y8(640, 400, scale)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if depth_frames.is_empty() || rgb_frames.is_empty() {
+        return Err(failure(
+            "bounded concurrent capture did not contain both depth and RGB candidates",
+        ));
+    }
+    if rgb_frames
+        .iter()
+        .any(|(_, rgb)| rgb.width != 1280 || rgb.height != 800 || rgb.device_timestamp_ms.is_none())
+    {
         return Err(failure(
             "concurrent RGB frame disagrees with the selected timestamped profile",
         ));
     }
+    let depth_timestamps = depth_frames
+        .iter()
+        .map(|frame| frame.device_timestamp_ms)
+        .collect::<Vec<_>>();
+    let rgb_timestamps = rgb_frames
+        .iter()
+        .map(|(_, frame)| frame.device_timestamp_ms.expect("validated timestamp"))
+        .collect::<Vec<_>>();
+    let selected = rgbd_pair::select_closest_pair(
+        &depth_timestamps,
+        &rgb_timestamps,
+        rgbd_pair::PairingPolicy::default(),
+    )
+    .ok_or_else(|| failure("captured RGB-D candidates contain no bounded timestamp pair"))?;
+    let depth = depth_frames.swap_remove(selected.depth_index);
+    let (rgb_payload, rgb) = rgb_frames.swap_remove(selected.rgb_index);
+    let rgb_timestamp_ms = rgb.device_timestamp_ms.expect("validated timestamp");
 
     let depth_path = format!("{output_prefix}-depth-mm.pgm");
     let rgb_path = format!("{output_prefix}-rgb.jpg");
     std::fs::write(&depth_path, stereo_depth::encode_z16_pgm(&depth.depth)?)?;
     std::fs::write(&rgb_path, &rgb_payload[..rgb.encoded_len])?;
     println!(
-        "Concurrent RGB-D smoke passed (not yet paired): depth_bytes={depth_received}, rgb_bytes={rgb_received}, depth_resolution={}x{}, rgb_resolution={}x{}, rgb_timestamp_ms={}, rgb_calibration={}x{}, depth={depth_path}, rgb={rgb_path}",
+        "Concurrent RGB-D smoke passed: depth_bytes={depth_received}, rgb_bytes={rgb_received}, depth_resolution={}x{}, rgb_resolution={}x{}, depth_timestamp_ms={}, rgb_timestamp_ms={}, timestamp_delta_ms={}, rgb_calibration={}x{}, depth={depth_path}, rgb={rgb_path}",
         depth.depth.width,
         depth.depth.height,
         rgb.width,
         rgb.height,
-        rgb.device_timestamp_ms.expect("validated timestamp"),
+        depth.device_timestamp_ms,
+        rgb_timestamp_ms,
+        selected.timestamps.absolute_delta_ms,
         calibration.intrinsics.calibration_width,
         calibration.intrinsics.calibration_height,
     );

@@ -117,26 +117,31 @@ fn rejects_inconsistent_z16_layout_and_invalid_scale() {
 
 #[test]
 fn splits_z16y8y8_into_depth_and_two_infrared_planes() {
+    let mut bytes = vec![0xaa; 160];
+    bytes[20..24].copy_from_slice(&208_743_u32.to_le_bytes());
+    bytes[80..120].fill(0xbb);
+    bytes[120..160].fill(0xcc);
     let decoded = DecodedDepth {
         flags: 3,
         compressed_len: 8,
-        decompressed_len: 8,
-        bytes: vec![1, 0, 2, 0, 10, 20, 30, 40],
+        decompressed_len: 160,
+        bytes,
     };
 
     let frame = decoded
-        .into_z16y8y8(2, 1, 0.1)
+        .into_z16y8y8(20, 2, 0.1)
         .expect("decode composite depth frame");
 
-    assert_eq!(frame.depth.bytes, [1, 0, 2, 0]);
-    assert_eq!(frame.left, [10, 20]);
-    assert_eq!(frame.right, [30, 40]);
+    assert_eq!(frame.device_timestamp_ms, 208_743);
+    assert_eq!(frame.depth.bytes, [0; 80]);
+    assert_eq!(frame.left, [0xbb; 40]);
+    assert_eq!(frame.right, [0xcc; 40]);
     assert_eq!(frame.depth.millimeters_per_unit, 0.1);
 }
 
 #[test]
 fn rejects_each_independent_z16y8y8_length_mismatch() {
-    for (decompressed_len, bytes) in [(7, vec![0; 8]), (8, vec![0; 7])] {
+    for (decompressed_len, bytes) in [(159, vec![0; 160]), (160, vec![0; 159])] {
         let decoded = DecodedDepth {
             flags: 3,
             compressed_len: 8,
@@ -144,7 +149,7 @@ fn rejects_each_independent_z16y8y8_length_mismatch() {
             bytes,
         };
 
-        assert!(decoded.into_z16y8y8(2, 1, 0.1).is_err());
+        assert!(decoded.into_z16y8y8(20, 2, 0.1).is_err());
     }
 }
 

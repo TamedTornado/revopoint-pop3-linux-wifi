@@ -1,4 +1,6 @@
-use revopoint_pop3_wifi::pair_decode::{decode_y8_pair, encode_y8_pgm, PairDecodeError};
+use revopoint_pop3_wifi::pair_decode::{
+    decode_wire_y8_pair, decode_y8_pair, encode_y8_pgm, PairDecodeError,
+};
 
 #[test]
 fn splits_pair_into_contiguous_left_and_right_y8_planes() {
@@ -8,8 +10,22 @@ fn splits_pair_into_contiguous_left_and_right_y8_planes() {
 
     assert_eq!(pair.width, 2);
     assert_eq!(pair.height, 2);
+    assert_eq!(pair.device_timestamp_ms, None);
     assert_eq!(pair.left, [1, 2, 3, 4]);
     assert_eq!(pair.right, [10, 20, 30, 40]);
+}
+
+#[test]
+fn extracts_and_clears_the_depth_extra_info_prefix_from_a_wire_pair() {
+    let mut decoded = vec![0xaa; 160];
+    decoded[20..24].copy_from_slice(&208_790_u32.to_le_bytes());
+    decoded[80..].fill(0xbb);
+
+    let pair = decode_wire_y8_pair(decoded, 80, 1).expect("wire PAIR frame");
+
+    assert_eq!(pair.device_timestamp_ms, Some(208_790));
+    assert_eq!(pair.left, [0; 80]);
+    assert_eq!(pair.right, [0xbb; 80]);
 }
 
 #[test]

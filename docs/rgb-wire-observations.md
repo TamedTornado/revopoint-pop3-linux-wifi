@@ -34,8 +34,7 @@ bounded six-second direct probe recovered 23 complete depth envelopes and 26
 complete RGB envelopes. The vendor SDK also starts the two streams separately
 and exposes a `getPairedFrame` operation; a black-box callback run returned 36
 depth frames and 35 RGB frames in eight seconds. Nearest depth/RGB SDK timestamps
-were consistently about 14–15 ms apart in the observed portion. The clean-room
-driver does not yet implement or qualify that pairing policy.
+were consistently about 14–15 ms apart in the observed portion.
 
 The clean-room Rust concurrent smoke now configures both sensors, opens both
 media endpoints together, and waits until both parsers have complete frame
@@ -45,8 +44,18 @@ validated 1280×800 JPEG with device timestamp 22,575,391 ms. Both ordinary imag
 files were visually checked. An earlier fixed-prefix attempt consistently let
 the faster depth capture close first and left the slower RGB capture silent;
 coordinating on application-frame completion fixed that transport-lifetime
-error without a scanner power cycle. This result establishes concurrent
-acquisition only, not timestamp pairing.
+error without a scanner power cycle.
+
+Depth binary inspection then located a timestamp in the decompressed depth
+metadata prefix. A new live concurrent run reported depth timestamp 23,709,703
+ms and RGB timestamp 23,709,718 ms, establishing that both fields use the same
+device uptime clock and reproducing the 15 ms separation seen through the SDK.
+The smoke command now collects eight frames from each stream, finds the closest
+pair for which RGB follows depth within an explicit 50 ms window, and handles
+`u32` timestamp wraparound. The first one-frame attempt correctly rejected a
+171 ms startup-skewed pair; the multi-frame run then selected a 15 ms pair from
+5,035,118 depth transport bytes and 505,455 RGB transport bytes. Spatial
+registration remains separate work.
 
 Three read-only calibration files were also recovered through the existing
 download command:

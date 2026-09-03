@@ -30,21 +30,24 @@ The read path has been tested against real hardware. The write path:
 
 It does **not** change firmware or send an upgrade command.
 
-The network acquisition path can configure the scanner's `PAIR` output,
-capture an exact byte count from its chunked HTTP media stream, recover bounded
-frame envelopes, decompress their QuickLZ payloads in Rust, and split each
-640x400 frame into contiguous left and right Y8 infrared images.
+The network acquisition path can configure either the scanner's `PAIR` output
+or its device-computed `Z16Y8Y8` output, capture an exact byte count from the
+chunked HTTP media stream, recover bounded frame envelopes, and decompress the
+QuickLZ payloads in Rust. PAIR frames split into two 640x400 Y8 infrared images;
+Z16Y8Y8 frames split into a little-endian Z16 plane followed by the two Y8
+planes.
 
-Metric depth is **not yet qualified**. Hardware tests disproved an earlier
+Physical accuracy is **not yet qualified**. Hardware tests disproved an earlier
 interpretation of selector 1 as Z16: those bytes are the two Y8 images described
 by the public SDK's `PAIR` layout. Treating adjacent bytes as little-endian
-depth created a plausible-looking but false point cloud. The CLI therefore no
-longer exposes the earlier depth/ROS commands, and the library's depth-capture
-entry point fails closed until host-side reconstruction is implemented.
-Binary inspection now confirms that RevoScan itself requests `PAIR` from the
-camera and derives depth later in its host-side processing pipeline. Clean-room
-rectification, correspondence, and reprojection now run end-to-end, but the
-result remains experimental until measured-target validation succeeds.
+depth created a plausible-looking but false point cloud. Selector 3 is now
+independently identified as `Z16Y8Y8` and produces a distinct, scanner-computed
+depth plane after the vendor-observed stream-reset and free-running-trigger
+sequence. A live wall capture reported a 167.8 mm median with 1.5 mm median
+absolute deviation while the scanner was estimated to be 150–300 mm away. That
+is a strong acquisition smoke test, not yet a metrology claim. Clean-room PAIR
+rectification, correspondence, and reprojection remain available as a separate
+experimental path.
 
 ## Build
 
@@ -126,6 +129,18 @@ Example output:
 PAIR stream smoke passed: bytes=1048576, resolution=640x400, left=/tmp/pop3-left.pgm, right=/tmp/pop3-right.pgm, left_rectified=/tmp/pop3-left-rectified.pgm, right_rectified=/tmp/pop3-right-rectified.pgm, disparity=/tmp/pop3-disparity.pgm, depth_mm=/tmp/pop3-depth-mm.pgm, valid_pixels=... (...%), global_disparity_px=..., global_depth_mm=..., median_disparity_px=..., experimental_median_depth_mm=..., depth_mad_mm=..., depth_p10_p90_mm=.....
 ```
 
+For the simpler scanner-computed depth slice:
+
+```sh
+cargo run --release -- --smoke-depth 192.168.8.245 /tmp/pop3-direct
+```
+
+This writes `/tmp/pop3-direct-depth-mm.pgm`, `-left.pgm`, and `-right.pgm`.
+The depth PGM converts the scanner's 0.1 mm raw units to unsigned millimeters;
+zero remains invalid. The command reports robust median, MAD, and p10–p90 depth
+statistics so a measured planar target can be checked without trusting a
+picture alone.
+
 The disparity image is currently a diagnostic, not qualified metric depth. It
 uses a bounded 0–160 pixel search, a 15×15 SAD support window, a provisional 1%
 best-versus-runner-up cost margin, and a one-pixel left/right consistency check.
@@ -151,8 +166,9 @@ cargo test --test http_stream --test depth_capture
 ```
 
 The repository retains separately tested Z16 decoding, calibration, ROS
-message-mapping, and RViz configuration work. None of it is currently wired to
-live acquisition because doing so would relabel PAIR pixels as metric depth.
+message-mapping, and RViz configuration work. Direct Z16Y8Y8 acquisition is now
+wired to the bounded smoke command; ROS remains wired to the experimental
+host-reconstructed PAIR path pending a deliberate output-selection interface.
 
 The independently established envelope is documented in
 [`docs/depth-wire-observations.md`](docs/depth-wire-observations.md).

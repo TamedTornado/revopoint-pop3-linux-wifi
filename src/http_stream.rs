@@ -156,16 +156,15 @@ fn read_chunked_body(
                 }
             }
         }
+        let accepted = prefix_bytes
+            .map(|limit| size.min(limit - received))
+            .unwrap_or(size);
         if received
-            .checked_add(size)
+            .checked_add(accepted)
             .is_none_or(|total| total > limits.max_body_bytes)
         {
             return Err(fail("HTTP response exceeds configured body limit"));
         }
-
-        let accepted = prefix_bytes
-            .map(|limit| size.min(limit - received))
-            .unwrap_or(size);
         buffered.read_exact_chunks(accepted, &mut receive)?;
         received += accepted;
         if accepted < size || prefix_bytes == Some(received) {

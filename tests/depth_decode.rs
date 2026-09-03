@@ -116,6 +116,39 @@ fn rejects_inconsistent_z16_layout_and_invalid_scale() {
 }
 
 #[test]
+fn splits_z16y8y8_into_depth_and_two_infrared_planes() {
+    let decoded = DecodedDepth {
+        flags: 3,
+        compressed_len: 8,
+        decompressed_len: 8,
+        bytes: vec![1, 0, 2, 0, 10, 20, 30, 40],
+    };
+
+    let frame = decoded
+        .into_z16y8y8(2, 1, 0.1)
+        .expect("decode composite depth frame");
+
+    assert_eq!(frame.depth.bytes, [1, 0, 2, 0]);
+    assert_eq!(frame.left, [10, 20]);
+    assert_eq!(frame.right, [30, 40]);
+    assert_eq!(frame.depth.millimeters_per_unit, 0.1);
+}
+
+#[test]
+fn rejects_each_independent_z16y8y8_length_mismatch() {
+    for (decompressed_len, bytes) in [(7, vec![0; 8]), (8, vec![0; 7])] {
+        let decoded = DecodedDepth {
+            flags: 3,
+            compressed_len: 8,
+            decompressed_len,
+            bytes,
+        };
+
+        assert!(decoded.into_z16y8y8(2, 1, 0.1).is_err());
+    }
+}
+
+#[test]
 fn reports_z16_statistics_in_raw_units_and_millimeters() {
     let decoded = DecodedDepth {
         flags: 0x47,

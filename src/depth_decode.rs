@@ -26,6 +26,13 @@ pub struct DepthPlane {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, PartialEq)]
+pub struct Z16Y8Y8Frame {
+    pub depth: DepthPlane,
+    pub left: Vec<u8>,
+    pub right: Vec<u8>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DepthStatistics {
     pub samples: usize,
@@ -67,6 +74,45 @@ impl DepthPlane {
 }
 
 impl DecodedDepth {
+    pub fn into_z16y8y8(
+        self,
+        width: u32,
+        height: u32,
+        millimeters_per_unit: f32,
+    ) -> Result<Z16Y8Y8Frame, DepthDecodeError> {
+        let pixels = usize::try_from(width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .ok_or_else(|| fail("Z16Y8Y8 frame size overflows the platform"))?;
+        let depth_bytes = pixels
+            .checked_mul(2)
+            .ok_or_else(|| fail("Z16Y8Y8 depth size overflows the platform"))?;
+        let expected_bytes = pixels
+            .checked_mul(4)
+            .ok_or_else(|| fail("Z16Y8Y8 frame size overflows the platform"))?;
+        if self.bytes.len() != expected_bytes || self.decompressed_len as usize != expected_bytes {
+            return Err(fail("decoded buffer length disagrees with Z16Y8Y8 layout"));
+        }
+
+        let mut bytes = self.bytes;
+        let right = bytes.split_off(depth_bytes + pixels);
+        let left = bytes.split_off(depth_bytes);
+        let depth = DecodedDepth {
+            flags: self.flags,
+            compressed_len: self.compressed_len,
+            decompressed_len: u32::try_from(depth_bytes)
+                .map_err(|_| fail("Z16Y8Y8 depth size exceeds its wire field"))?,
+            bytes,
+        }
+        .into_z16_plane(width, height, millimeters_per_unit)?;
+
+        Ok(Z16Y8Y8Frame { depth, left, right })
+    }
+
     pub fn into_z16_plane(
         self,
         width: u32,

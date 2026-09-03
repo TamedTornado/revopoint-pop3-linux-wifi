@@ -47,7 +47,8 @@ crate rather than copying or translating that routine.
 
 The official binary configures network profiles with explicit display width,
 height, and stream-format values. Revopoint's public SDK headers identify format
-value 2 as Z16 and format value 4 as `PAIR`, containing left and right Y8 images.
+value 3 as `Z16Y8Y8` and format value 4 as `PAIR`. Z16Y8Y8 contains a Z16 plane
+followed by left and right Y8 planes; PAIR contains only the two Y8 planes.
 
 The Windows SDK's network start path changes that selection in place; it does
 not power-cycle the scanner. It sends the profile, waits 300 ms, and retries the
@@ -77,8 +78,23 @@ prerequisite: it may simply be an unused firmware path for this model.
 Selector 1 reliably produces media without a power cycle. Current binary
 inspection maps the SDK's `PAIR` format to selector 1, and the public SDK source
 defines its memory layout as one contiguous left Y8 plane followed by one
-contiguous right Y8 plane. The Rust acquisition path now exposes only that
-verified PAIR result.
+contiguous right Y8 plane.
+
+Android library inspection maps `Z16Y8Y8` to selector 3 and a four-byte display
+profile; the display type is bytes per pixel, not the stream-format enum itself.
+A patched temporary copy of Revopoint's obsolete Linux SDK was used only as a
+black-box network oracle after its host-side license gate rejected this newer
+scanner. System-call tracing exposed two setup operations missing from the
+first clean-room probe: close all existing streams before changing the profile,
+and set trigger mode 0 for free-running acquisition. No vendor library, patch,
+or captured frame is present in this repository.
+
+Replaying the independently observed sequence in Rust—close streams, select a
+640×400 four-byte display profile, select output 3, set free-running trigger,
+then open camera 21—produced live media without rebooting the scanner. The
+decoded 1,024,000-byte frame splits exactly into 512,000 bytes of little-endian
+Z16 and two 256,000-byte Y8 planes. The acquisition path retains PAIR as a
+separate diagnostic mode rather than conflating its intensities with depth.
 
 A usable PAIR image also requires both pre-ISP illumination controls: register
 `0xb00` enables the LED master and `0xb01` enables the infrared projector. With
@@ -131,9 +147,11 @@ samples are unsigned millimeters in network byte order, as required by PGM,
 with zero reserved for invalid correspondence. ImageMagick identifies a live
 artifact as 640×400, 16-bit, with a 0–272 sample range.
 
-The scanner's read-only `get_depth_reso` endpoint reports `curr-resolution` as
-`640x400x2`. That is also the total byte count for two Y8 planes: 512,000 bytes.
-It is not sufficient evidence of a little-endian Z16 plane.
+The scanner's read-only `get_depth_reso` endpoint reports `curr-resolution`
+according to the active profile. Under PAIR it reported `640x400x2`, which is
+also the total byte count for two Y8 planes and was not evidence of Z16. Under
+the Z16Y8Y8 profile it reports `640x400x4`, matching the verified four-byte
+layout.
 
 The official SDK describes its depth scale as the physical millimeters
 represented by one raw depth unit. Binary inspection established that the
@@ -168,6 +186,14 @@ Selector 1 produced 512,000-byte decoded frames. Interpreting each adjacent byte
 pair as a `u16` yielded values around 190 mm and a non-empty RViz cloud, but that
 interpretation was wrong. The bytes are contiguous left/right Y8 planes. The
 apparently geometric V-shaped cloud was an artifact of combining unrelated
-neighboring intensity pixels. These observations invalidate the earlier live
-Z16, metric-depth, and RViz acceptance claims; the repository now fails closed
-instead of exposing them.
+neighboring intensity pixels. These observations invalidate the earlier
+selector-1 depth claim.
+
+A later selector-3 Z16Y8Y8 run captured and decoded scanner-computed depth at
+640×400. It contained 163,844 nonzero samples (64.0%). Applying the independently
+queried 0.1 mm scale yielded a 167.8 mm median, 1.5 mm median absolute deviation,
+and 165.0–170.7 mm p10–p90 range while the scanner was roughly 150–300 mm from a
+wall. The accompanying left infrared image showed the same wall boundary and
+projected texture. This qualifies the acquisition and plane-splitting slice;
+it does not yet qualify absolute accuracy because the target distance was not
+measured for that run.

@@ -355,6 +355,7 @@ fn run(write: bool, diagnose: bool) -> Result<(), Box<dyn Error>> {
 }
 
 const PAIR_PREFIX_BYTES: usize = 1024 * 1024;
+const DEPTH_PREFIX_BYTES: usize = 2 * 1024 * 1024;
 const MAXIMUM_DISPARITY: u16 = 160;
 const MINIMUM_MATCH_MARGIN_PERCENT: u16 = 1;
 
@@ -403,6 +404,45 @@ fn capture_pair_frame(
     let pair =
         first_pair.ok_or_else(|| failure("bounded capture contained no complete PAIR frame"))?;
     Ok((received, pair))
+}
+
+fn capture_depth_frame(
+    address: SocketAddr,
+    limits: http_stream::StreamLimits,
+) -> Result<(usize, depth_decode::Z16Y8Y8Frame), Box<dyn Error>> {
+    let scale = depth_stream::get_depth_scale_mm(address, limits)?;
+    let mut parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
+    let mut first_frame = None;
+    let mut frame_error: Option<Box<dyn Error>> = None;
+    let received =
+        depth_stream::capture_depth_prefix(address, limits, DEPTH_PREFIX_BYTES, |chunk| {
+            if first_frame.is_some() || frame_error.is_some() {
+                return;
+            }
+            match parser.push(chunk) {
+                Ok(frames) => {
+                    if let Some(frame) = frames.into_iter().next() {
+                        match depth_decode::decode_quicklz(&frame, 640 * 400 * 4)
+                            .map_err(|error| Box::new(error) as Box<dyn Error>)
+                            .and_then(|decoded| {
+                                decoded
+                                    .into_z16y8y8(640, 400, scale)
+                                    .map_err(|error| Box::new(error) as Box<dyn Error>)
+                            }) {
+                            Ok(frame) => first_frame = Some(frame),
+                            Err(error) => frame_error = Some(error),
+                        }
+                    }
+                }
+                Err(error) => frame_error = Some(Box::new(error)),
+            }
+        })?;
+    if let Some(error) = frame_error {
+        return Err(error);
+    }
+    let frame = first_frame
+        .ok_or_else(|| failure("bounded capture contained no complete Z16Y8Y8 frame"))?;
+    Ok((received, frame))
 }
 
 struct ReconstructedPair {
@@ -532,6 +572,41 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn smoke_depth(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
+    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let (received, frame) = capture_depth_frame(address, network_limits())?;
+    let statistics = frame.depth.statistics();
+    let robust_statistics = stereo_depth::depth_z_statistics(&frame.depth)?;
+    let valid_percent = statistics.nonzero_samples as f64 * 100.0 / statistics.samples as f64;
+    let depth_path = format!("{output_prefix}-depth-mm.pgm");
+    let left_path = format!("{output_prefix}-left.pgm");
+    let right_path = format!("{output_prefix}-right.pgm");
+    std::fs::write(&depth_path, stereo_depth::encode_z16_pgm(&frame.depth)?)?;
+    std::fs::write(
+        &left_path,
+        pair_decode::encode_y8_pgm(frame.depth.width, frame.depth.height, &frame.left)?,
+    )?;
+    std::fs::write(
+        &right_path,
+        pair_decode::encode_y8_pgm(frame.depth.width, frame.depth.height, &frame.right)?,
+    )?;
+    println!(
+        "Z16Y8Y8 stream smoke passed: bytes={received}, resolution={}x{}, scale_mm={}, depth={depth_path}, left={left_path}, right={right_path}, valid_pixels={} ({valid_percent:.1}%), min_raw={:?}, max_raw={}, mean_depth_mm={:?}, median_depth_mm={:.1}, depth_mad_mm={:.1}, depth_p10_p90_mm={:.1}..{:.1}",
+        frame.depth.width,
+        frame.depth.height,
+        frame.depth.millimeters_per_unit,
+        statistics.nonzero_samples,
+        statistics.minimum_nonzero_raw,
+        statistics.maximum_raw,
+        statistics.mean_nonzero_mm,
+        robust_statistics.median_mm,
+        robust_statistics.median_absolute_deviation_mm,
+        robust_statistics.p10_mm,
+        robust_statistics.p90_mm,
+    );
+    Ok(())
+}
+
 #[cfg(feature = "ros2")]
 fn ros2_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     use rclrs::CreateBasicExecutor;
@@ -606,6 +681,15 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 }
             }
         }
+        [argument, ip, output_prefix] if argument == "--smoke-depth" => {
+            return match smoke_depth(ip, output_prefix) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
         [argument, ip] if argument == "--ros2-depth" => {
             return match ros2_depth(ip) {
                 Ok(()) => 0,
@@ -616,18 +700,19 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             }
         }
         [argument] if argument == "--help" || argument == "-h" => {
-            println!("Usage: {program} [--write | --diagnose | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
             println!("  --diagnose    Report scanner-side Wi-Fi diagnostics over USB");
+            println!("  --smoke-depth IP OUTPUT_PREFIX  Save device-computed depth and infrared PGM images");
             println!("  --smoke-pair IP OUTPUT_PREFIX  Save left/right infrared PGM images");
             println!("  --ros2-depth IP  Publish 20 experimental reconstructed ROS 2 frames");
             println!("  -h, --help    Show this help");
             return 0;
         }
         _ => {
-            eprintln!("Usage: {program} [--write | --diagnose | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             return 2;
         }
     };

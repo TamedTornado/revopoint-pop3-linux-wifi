@@ -5,14 +5,17 @@ use std::net::SocketAddr;
 use std::thread;
 use std::time::Duration;
 
-// Hardware capture established that selector 1 produces STREAM_FORMAT_PAIR:
-// two contiguous 640x400 Y8 infrared planes. Selector 2 is accepted by the
-// firmware but does not produce media in isolated tests. RevoScan itself asks
-// the camera API for PAIR and derives depth later in its host-side pipeline.
+// Recovered from the Android SDK's network-camera format switch:
+// STREAM_FORMAT_Z16Y8Y8 (3) maps to firmware selector 3, while
+// STREAM_FORMAT_PAIR (4) maps to selector 1. Z16Y8Y8 contains a Z16 plane
+// followed by two Y8 infrared planes and lets the scanner perform stereo.
+const SET_Z16Y8Y8_FORMAT: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=3";
 const SET_PAIR_FORMAT: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=1";
-const SET_DEPTH_PROFILE: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_display_reso=1&&set_display_width=640&&set_display_height=400&&set_display_type=2";
+const SET_Z16Y8Y8_PROFILE: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_display_reso=1&&set_display_width=640&&set_display_height=400&&set_display_type=4";
+const SET_PAIR_PROFILE: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_display_reso=1&&set_display_width=640&&set_display_height=400&&set_display_type=2";
 const GET_DEPTH_RESOLUTION: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&get_depth_reso";
 const GET_DEPTH_SCALE: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&algo_get_cmd_buf=2328";
+const SET_FREE_RUNNING_TRIGGER: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_trigger_mode=0";
 const DEPTH_MEDIA: &str = "/cgi-bin/zx_media.cgi?camera_id=21";
 const CLOSE_STREAMS: &str = "/cgi-bin/zx_cmd.cgi?close_stream_all";
 const LED_MASTER_ON: &str =
@@ -129,7 +132,6 @@ pub enum DepthStreamError {
     RejectedConfiguration,
     InvalidResolution(DepthResolutionError),
     InvalidScale(DepthScaleError),
-    DepthOutputUnavailable,
     RejectedEmitter(&'static str),
 }
 
@@ -143,9 +145,6 @@ impl Display for DepthStreamError {
             }
             Self::InvalidResolution(error) => Display::fmt(error, formatter),
             Self::InvalidScale(error) => Display::fmt(error, formatter),
-            Self::DepthOutputUnavailable => formatter.write_str(
-                "Z16 acquisition is not yet implemented; refusing to interpret PAIR images as depth",
-            ),
             Self::RejectedEmitter(stage) => write!(formatter, "scanner rejected {stage}"),
         }
     }
@@ -158,19 +157,34 @@ impl Error for DepthStreamError {
             Self::RejectedProfile | Self::RejectedConfiguration => None,
             Self::InvalidResolution(error) => Some(error),
             Self::InvalidScale(error) => Some(error),
-            Self::DepthOutputUnavailable => None,
             Self::RejectedEmitter(_) => None,
         }
     }
 }
 
 pub fn capture_depth_prefix(
-    _address: SocketAddr,
-    _limits: StreamLimits,
-    _prefix_bytes: usize,
-    _receive: impl FnMut(&[u8]),
+    address: SocketAddr,
+    limits: StreamLimits,
+    prefix_bytes: usize,
+    receive: impl FnMut(&[u8]),
 ) -> Result<usize, DepthStreamError> {
-    Err(DepthStreamError::DepthOutputUnavailable)
+    // The vendor SDK closes any existing camera stream before changing the
+    // Z16Y8Y8 display profile. Without this reset the firmware accepts the
+    // selector but leaves camera 21 silent.
+    get_bounded_body(address, CLOSE_STREAMS, limits).map_err(|source| DepthStreamError::Http {
+        stage: "close existing streams",
+        source,
+    })?;
+    capture_prefix(
+        address,
+        limits,
+        prefix_bytes,
+        receive,
+        SET_Z16Y8Y8_PROFILE,
+        SET_Z16Y8Y8_FORMAT,
+        true,
+        "capture Z16Y8Y8 media",
+    )
 }
 
 pub fn get_current_depth_resolution(
@@ -205,9 +219,31 @@ pub fn capture_pair_prefix(
     prefix_bytes: usize,
     receive: impl FnMut(&[u8]),
 ) -> Result<usize, DepthStreamError> {
-    let profile = get_bounded_body(address, SET_DEPTH_PROFILE, limits).map_err(|source| {
+    capture_prefix(
+        address,
+        limits,
+        prefix_bytes,
+        receive,
+        SET_PAIR_PROFILE,
+        SET_PAIR_FORMAT,
+        false,
+        "capture PAIR media",
+    )
+}
+
+fn capture_prefix(
+    address: SocketAddr,
+    limits: StreamLimits,
+    prefix_bytes: usize,
+    receive: impl FnMut(&[u8]),
+    profile_path: &'static str,
+    output_selector: &'static str,
+    set_free_running_trigger: bool,
+    capture_stage: &'static str,
+) -> Result<usize, DepthStreamError> {
+    let profile = get_bounded_body(address, profile_path, limits).map_err(|source| {
         DepthStreamError::Http {
-            stage: "configure PAIR profile",
+            stage: "configure depth profile",
             source,
         }
     })?;
@@ -220,7 +256,7 @@ pub fn capture_pair_prefix(
     // reboot or reconnect the scanner when changing selectors.
     thread::sleep(PROFILE_SETTLE_TIME);
     for attempt in 0..SELECTOR_ATTEMPTS {
-        match get_bounded_body(address, SET_PAIR_FORMAT, limits) {
+        match get_bounded_body(address, output_selector, limits) {
             Ok(configuration) if trim_ascii_whitespace(&configuration) == br#"{"result":0}"# => {
                 break;
             }
@@ -240,6 +276,19 @@ pub fn capture_pair_prefix(
         }
     }
 
+    if set_free_running_trigger {
+        let trigger =
+            get_bounded_body(address, SET_FREE_RUNNING_TRIGGER, limits).map_err(|source| {
+                DepthStreamError::Http {
+                    stage: "configure free-running trigger",
+                    source,
+                }
+            })?;
+        if trim_ascii_whitespace(&trigger) != br#"{"result":0}"# {
+            return Err(DepthStreamError::RejectedConfiguration);
+        }
+    }
+
     set_emitter(address, limits, LED_MASTER_ON, "enable LED master")?;
     if let Err(error) = set_emitter(address, limits, LED_IR_ON, "enable infrared projector") {
         let _ = set_emitter(address, limits, LED_IR_OFF, "disable infrared projector");
@@ -255,7 +304,7 @@ pub fn capture_pair_prefix(
     match (capture, close, infrared_off, master_off) {
         (Ok(received), Ok(_), Ok(()), Ok(())) => Ok(received),
         (Err(source), _, _, _) => Err(DepthStreamError::Http {
-            stage: "capture PAIR media",
+            stage: capture_stage,
             source,
         }),
         (Ok(_), Err(source), _, _) => Err(DepthStreamError::Http {

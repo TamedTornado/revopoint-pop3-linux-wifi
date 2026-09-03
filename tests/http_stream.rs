@@ -217,6 +217,32 @@ fn captures_an_exact_prefix_and_disconnects_without_waiting_for_stream_end() {
 }
 
 #[test]
+fn captures_a_prefix_from_a_chunk_larger_than_the_total_capture_limit() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let Some(mut stream) = accept_fixture(&listener) else {
+            return;
+        };
+        read_request(&mut stream);
+        let _ = stream
+            .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n8\r\nABCDEFGH\r\n");
+    });
+    let mut bounded = limits();
+    bounded.max_body_bytes = 5;
+    let mut body = Vec::new();
+
+    let received = get_chunked_prefix(address, "/stream", bounded, 5, |chunk| {
+        body.extend_from_slice(chunk)
+    })
+    .expect("capture prefix within the configured limit");
+
+    assert_eq!(received, 5);
+    assert_eq!(body, b"ABCDE");
+    server.join().expect("fixture server");
+}
+
+#[test]
 fn reads_fragmented_content_length_control_response() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
     let address = listener.local_addr().expect("fixture address");

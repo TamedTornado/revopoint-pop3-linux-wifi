@@ -166,12 +166,45 @@ fn encodes_big_endian_sixteen_bit_pgm_for_linux_viewers() {
             height: 1,
             stride_bytes: 4,
             encoding: DepthEncoding::Z16LittleEndian,
-            millimeters_per_unit: 2.0,
+            millimeters_per_unit: 0.0,
             bytes: vec![0; 4],
         },
     ] {
         assert!(encode_z16_pgm(&invalid).is_err());
     }
+}
+
+#[test]
+fn converts_device_depth_units_to_millimeters_in_the_pgm() {
+    let depth = DepthPlane {
+        width: 2,
+        height: 1,
+        stride_bytes: 4,
+        encoding: DepthEncoding::Z16LittleEndian,
+        millimeters_per_unit: 0.1,
+        bytes: [1234_u16, 0].map(u16::to_le_bytes).concat(),
+    };
+
+    let pgm = encode_z16_pgm(&depth).expect("metric depth PGM");
+
+    assert_eq!(&pgm[..13], b"P5\n2 1\n65535\n");
+    assert_eq!(&pgm[13..], &[0, 123, 0, 0]);
+}
+
+#[test]
+fn maps_device_depth_beyond_the_pgm_range_to_invalid_zero() {
+    let depth = DepthPlane {
+        width: 1,
+        height: 1,
+        stride_bytes: 2,
+        encoding: DepthEncoding::Z16LittleEndian,
+        millimeters_per_unit: 2.0,
+        bytes: 40_000_u16.to_le_bytes().to_vec(),
+    };
+
+    let pgm = encode_z16_pgm(&depth).expect("bounded metric depth PGM");
+
+    assert_eq!(&pgm[13..], &[0, 0]);
 }
 
 #[test]

@@ -91,7 +91,8 @@ pub fn encode_z16_pgm(depth: &DepthPlane) -> Result<Vec<u8>, StereoDepthError> {
         || depth.height == 0
         || depth.stride_bytes != stride
         || depth.bytes.len() != expected
-        || depth.millimeters_per_unit != 1.0
+        || !depth.millimeters_per_unit.is_finite()
+        || depth.millimeters_per_unit <= 0.0
     {
         return Err(StereoDepthError);
     }
@@ -100,7 +101,14 @@ pub fn encode_z16_pgm(depth: &DepthPlane) -> Result<Vec<u8>, StereoDepthError> {
     let mut pgm = Vec::with_capacity(header.len() + expected);
     pgm.extend_from_slice(header.as_bytes());
     for sample in depth.bytes.as_chunks::<2>().0 {
-        pgm.extend_from_slice(&u16::from_le_bytes(*sample).to_be_bytes());
+        let raw = u16::from_le_bytes(*sample);
+        let millimeters = (f32::from(raw) * depth.millimeters_per_unit).round();
+        let metric_sample = if millimeters <= f32::from(u16::MAX) {
+            millimeters as u16
+        } else {
+            0
+        };
+        pgm.extend_from_slice(&metric_sample.to_be_bytes());
     }
     Ok(pgm)
 }

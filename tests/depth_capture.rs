@@ -38,17 +38,75 @@ fn limits() -> StreamLimits {
 }
 
 #[test]
-fn refuses_to_relabel_pair_bytes_as_depth() {
-    let error = capture_depth_prefix(
-        "127.0.0.1:1".parse().expect("socket address"),
-        limits(),
-        1,
-        |_| {},
-    )
-    .expect_err("depth acquisition must fail closed");
+fn requests_vendor_verified_z16y8y8_selector_for_depth() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let (mut close, _) = listener.accept().expect("accept initial close request");
+        assert_eq!(
+            read_path(&mut close),
+            "/cgi-bin/zx_cmd.cgi?close_stream_all"
+        );
+        close
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write initial close response");
 
-    assert!(matches!(error, DepthStreamError::DepthOutputUnavailable));
-    assert!(error.to_string().contains("refusing to interpret PAIR"));
+        let (mut profile, _) = listener.accept().expect("accept profile request");
+        assert_eq!(
+            read_path(&mut profile),
+            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_display_reso=1&&set_display_width=640&&set_display_height=400&&set_display_type=4"
+        );
+        profile
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write profile response");
+
+        let (mut selector, _) = listener.accept().expect("accept selector request");
+        assert_eq!(
+            read_path(&mut selector),
+            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=3"
+        );
+        selector
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write selector response");
+
+        let (mut trigger, _) = listener.accept().expect("accept trigger-mode request");
+        assert_eq!(
+            read_path(&mut trigger),
+            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_trigger_mode=0"
+        );
+        trigger
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write trigger-mode response");
+
+        expect_control(&listener, LED_MASTER_ON_PATH);
+        expect_control(&listener, LED_IR_ON_PATH);
+
+        let (mut media, _) = listener.accept().expect("accept media request");
+        assert_eq!(read_path(&mut media), "/cgi-bin/zx_media.cgi?camera_id=21");
+        media
+            .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\ndepth\r\n")
+            .expect("write media response");
+
+        let (mut close, _) = listener.accept().expect("accept close request");
+        assert_eq!(
+            read_path(&mut close),
+            "/cgi-bin/zx_cmd.cgi?close_stream_all"
+        );
+        close
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write close response");
+        expect_control(&listener, LED_IR_OFF_PATH);
+        expect_control(&listener, LED_MASTER_OFF_PATH);
+    });
+
+    let mut body = Vec::new();
+    let received =
+        capture_depth_prefix(address, limits(), 5, |chunk| body.extend_from_slice(chunk))
+            .expect("capture Z16Y8Y8 prefix");
+
+    assert_eq!(received, 5);
+    assert_eq!(body, b"depth");
+    server.join().expect("fixture server");
 }
 
 fn envelope(payload: &[u8]) -> Vec<u8> {

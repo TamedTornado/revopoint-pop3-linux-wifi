@@ -55,7 +55,8 @@ pub fn get_bounded_body(
     if is_chunked(&header)? {
         let mut body = Vec::new();
         read_chunked_body(&mut buffered, limits, None, |chunk| {
-            body.extend_from_slice(chunk)
+            body.extend_from_slice(chunk);
+            false
         })?;
         return Ok(body);
     }
@@ -113,12 +114,11 @@ pub fn get_chunked_prefix(
     get_chunked_inner(address, path, limits, Some(prefix_bytes), receive)
 }
 
-fn get_chunked_inner(
+pub fn get_chunked_until(
     address: SocketAddr,
     path: &str,
     limits: StreamLimits,
-    prefix_bytes: Option<usize>,
-    receive: impl FnMut(&[u8]),
+    receive: impl FnMut(&[u8]) -> bool,
 ) -> Result<usize, StreamError> {
     validate_request(path, limits)?;
     let started = Instant::now();
@@ -127,14 +127,34 @@ fn get_chunked_inner(
     let header = buffered.read_header()?;
     validate_response_header(&header)?;
 
-    read_chunked_body(&mut buffered, limits, prefix_bytes, receive)
+    read_chunked_body(&mut buffered, limits, None, receive)
+}
+
+fn get_chunked_inner(
+    address: SocketAddr,
+    path: &str,
+    limits: StreamLimits,
+    prefix_bytes: Option<usize>,
+    mut receive: impl FnMut(&[u8]),
+) -> Result<usize, StreamError> {
+    validate_request(path, limits)?;
+    let started = Instant::now();
+    let stream = open_get(address, path, limits)?;
+    let mut buffered = BufferedStream::new(stream, started, limits);
+    let header = buffered.read_header()?;
+    validate_response_header(&header)?;
+
+    read_chunked_body(&mut buffered, limits, prefix_bytes, |chunk| {
+        receive(chunk);
+        false
+    })
 }
 
 fn read_chunked_body(
     buffered: &mut BufferedStream,
     limits: StreamLimits,
     prefix_bytes: Option<usize>,
-    mut receive: impl FnMut(&[u8]),
+    mut receive: impl FnMut(&[u8]) -> bool,
 ) -> Result<usize, StreamError> {
     let mut received = 0_usize;
     loop {
@@ -165,9 +185,13 @@ fn read_chunked_body(
         {
             return Err(fail("HTTP response exceeds configured body limit"));
         }
-        buffered.read_exact_chunks(accepted, &mut receive)?;
+        let mut application_complete = false;
+        let mut inspect = |chunk: &[u8]| {
+            application_complete |= receive(chunk);
+        };
+        buffered.read_exact_chunks(accepted, &mut inspect)?;
         received += accepted;
-        if accepted < size || prefix_bytes == Some(received) {
+        if application_complete || accepted < size || prefix_bytes == Some(received) {
             return Ok(received);
         }
         if buffered.read_exact_vec(2)? != b"\r\n" {

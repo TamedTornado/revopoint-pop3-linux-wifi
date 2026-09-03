@@ -15,6 +15,7 @@ pub mod pair_decode;
 pub mod rgb_calibration;
 pub mod rgb_decode;
 pub mod rgb_stream;
+pub mod rgbd_stream;
 #[cfg(feature = "ros2")]
 pub mod ros2_adapter;
 pub mod ros_camera;
@@ -659,6 +660,81 @@ fn smoke_rgb(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
+    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let limits = network_limits();
+    let mut depth_parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
+    let mut rgb_parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
+    let mut depth_envelope = None;
+    let mut rgb_frame = None;
+    let mut depth_error = None;
+    let mut rgb_error = None;
+    let (depth_received, rgb_received) = rgbd_stream::capture_rgbd_until(
+        address,
+        limits,
+        |chunk| {
+            if depth_envelope.is_none() && depth_error.is_none() {
+                match depth_parser.push(chunk) {
+                    Ok(frames) => depth_envelope = frames.into_iter().next(),
+                    Err(error) => depth_error = Some(error.to_string()),
+                }
+            }
+            depth_envelope.is_some() || depth_error.is_some()
+        },
+        |chunk| {
+            if rgb_frame.is_none() && rgb_error.is_none() {
+                match rgb_parser.push(chunk) {
+                    Ok(frames) => {
+                        if let Some(frame) = frames.into_iter().next() {
+                            match rgb_decode::inspect_jpeg(&frame.payload) {
+                                Ok(information) => rgb_frame = Some((frame.payload, information)),
+                                Err(error) => rgb_error = Some(error.to_string()),
+                            }
+                        }
+                    }
+                    Err(error) => rgb_error = Some(error.to_string()),
+                }
+            }
+            rgb_frame.is_some() || rgb_error.is_some()
+        },
+    )?;
+    if let Some(error) = depth_error {
+        return Err(failure(format!("depth frame envelope: {error}")));
+    }
+    if let Some(error) = rgb_error {
+        return Err(failure(format!("RGB frame: {error}")));
+    }
+    let scale = depth_stream::get_depth_scale_mm(address, limits)?;
+    let calibration = rgb_calibration::get_rgb_calibration(address, limits)?;
+    let depth_envelope = depth_envelope
+        .ok_or_else(|| failure("bounded concurrent capture contained no complete depth frame"))?;
+    let depth = depth_decode::decode_quicklz(&depth_envelope, 640 * 400 * 4)?
+        .into_z16y8y8(640, 400, scale)?;
+    let (rgb_payload, rgb) = rgb_frame
+        .ok_or_else(|| failure("bounded concurrent capture contained no complete RGB frame"))?;
+    if rgb.width != 1280 || rgb.height != 800 || rgb.device_timestamp_ms.is_none() {
+        return Err(failure(
+            "concurrent RGB frame disagrees with the selected timestamped profile",
+        ));
+    }
+
+    let depth_path = format!("{output_prefix}-depth-mm.pgm");
+    let rgb_path = format!("{output_prefix}-rgb.jpg");
+    std::fs::write(&depth_path, stereo_depth::encode_z16_pgm(&depth.depth)?)?;
+    std::fs::write(&rgb_path, &rgb_payload[..rgb.encoded_len])?;
+    println!(
+        "Concurrent RGB-D smoke passed (not yet paired): depth_bytes={depth_received}, rgb_bytes={rgb_received}, depth_resolution={}x{}, rgb_resolution={}x{}, rgb_timestamp_ms={}, rgb_calibration={}x{}, depth={depth_path}, rgb={rgb_path}",
+        depth.depth.width,
+        depth.depth.height,
+        rgb.width,
+        rgb.height,
+        rgb.device_timestamp_ms.expect("validated timestamp"),
+        calibration.intrinsics.calibration_width,
+        calibration.intrinsics.calibration_height,
+    );
+    Ok(())
+}
+
 fn inspect_rgb_calibration(ip: &str) -> Result<(), Box<dyn Error>> {
     let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
     let calibration = rgb_calibration::get_rgb_calibration(address, network_limits())?;
@@ -773,6 +849,15 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 }
             };
         }
+        [argument, ip, output_prefix] if argument == "--smoke-rgbd" => {
+            return match smoke_rgbd(ip, output_prefix) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
         [argument, ip] if argument == "--inspect-rgb-calibration" => {
             return match inspect_rgb_calibration(ip) {
                 Ok(()) => 0,
@@ -792,13 +877,16 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             }
         }
         [argument] if argument == "--help" || argument == "-h" => {
-            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
             println!("  --diagnose    Report scanner-side Wi-Fi diagnostics over USB");
             println!("  --smoke-depth IP OUTPUT_PREFIX  Save device-computed depth and infrared PGM images");
             println!("  --smoke-rgb IP OUTPUT_PREFIX  Save one validated RGB JPEG image");
+            println!(
+                "  --smoke-rgbd IP OUTPUT_PREFIX  Save concurrently acquired depth and RGB images"
+            );
             println!(
                 "  --inspect-rgb-calibration IP  Print RGB intrinsics and left-to-RGB transform"
             );
@@ -808,7 +896,7 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             return 0;
         }
         _ => {
-            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             return 2;
         }
     };

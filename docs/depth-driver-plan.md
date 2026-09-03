@@ -161,9 +161,11 @@ enable control, free-running trigger requirement, and camera-50 media endpoint.
 The clean-room Rust path now recovers envelope-delimited JPEG frames, validates
 their dimensions, separates their little-endian millisecond timestamp, and
 writes an ordinary JPEG. A live smoke produced a recognizable 1280×800 wall
-image. The scanner also served both media endpoints concurrently, and the Rust
-path now downloads and validates RGB intrinsics, five distortion coefficients,
-and the left-depth-camera-to-RGB transform. Pairing policy, registration,
+image. A public Rust command now holds the depth and RGB endpoints open together
+until both have reached complete frame boundaries, then writes checkable depth
+PGM and RGB JPEG files. The path also downloads and validates RGB intrinsics,
+five distortion coefficients, and the left-depth-camera-to-RGB transform.
+These frames are concurrent but not yet paired. Pairing policy, registration,
 archive format, turntable angle metadata, masking, and dataset adapters remain
 open.
 

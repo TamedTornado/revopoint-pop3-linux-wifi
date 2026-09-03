@@ -2,8 +2,8 @@
 
 A Linux-native Rust project for interoperating with a Revopoint POP 3 scanner.
 It currently provisions Wi-Fi client credentials over USB and performs bounded
-binocular-infrared acquisition over the LAN. It avoids installing or running Revo
-Scan, Windows, Wine, or a virtual machine.
+depth, infrared, and RGB acquisition over the LAN. It avoids installing or
+running Revo Scan, Windows, Wine, or a virtual machine.
 
 This project is an independent interoperability implementation. It contains no
 Revopoint source code, SDK headers, binaries, firmware, application assets, or
@@ -155,6 +155,18 @@ output. The calibration command reads and validates the scanner's RGB
 intrinsics, distortion, and left-depth-camera-to-RGB transform. Concurrent
 transport has been demonstrated, but the clean-room driver does not yet claim
 paired RGB-D frames.
+
+To exercise both live media endpoints together:
+
+```sh
+cargo run --release -- --smoke-rgbd 192.168.8.245 /tmp/pop3
+```
+
+This holds both media connections open until each parser has reached a complete
+application-frame boundary, then writes `/tmp/pop3-depth-mm.pgm` and
+`/tmp/pop3-rgb.jpg`. Both files open in ordinary Linux image viewers. The two
+frames are concurrent but **not yet time-paired or spatially registered**; the
+command says so rather than overstating the current result.
 
 The disparity image is currently a diagnostic, not qualified metric depth. It
 uses a bounded 0–160 pixel search, a 15×15 SAD support window, a provisional 1%

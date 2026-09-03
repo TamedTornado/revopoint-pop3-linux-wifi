@@ -1,5 +1,6 @@
 use revopoint_pop3_wifi::http_stream::{
-    get_bounded_body, get_chunked, get_chunked_prefix, get_content_length, StreamLimits,
+    get_bounded_body, get_chunked, get_chunked_prefix, get_chunked_until, get_content_length,
+    StreamLimits,
 };
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -213,6 +214,32 @@ fn captures_an_exact_prefix_and_disconnects_without_waiting_for_stream_end() {
 
     assert_eq!(received, 5);
     assert_eq!(body, b"ABCDE");
+    server.join().expect("fixture server");
+}
+
+#[test]
+fn callback_can_end_a_live_stream_after_a_complete_application_frame() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let Some(mut stream) = accept_fixture(&listener) else {
+            return;
+        };
+        read_request(&mut stream);
+        let _ = stream.write_all(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nABCD\r\n4\r\nEFGH\r\n",
+        );
+    });
+    let mut body = Vec::new();
+
+    let received = get_chunked_until(address, "/stream", limits(), |chunk| {
+        body.extend_from_slice(chunk);
+        body.len() >= 5
+    })
+    .expect("callback-completed stream");
+
+    assert_eq!(received, 8);
+    assert_eq!(body, b"ABCDEFGH");
     server.join().expect("fixture server");
 }
 

@@ -59,7 +59,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the PAIR and RGB/JPEG decoders, RGB controls, RGB calibration parser, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, normalized global-shift diagnostic, map/Q parser/full reprojection, metric Z16/PGM, and robust depth-statistics focused sets catch all viable mutants exercised. The initial RGB set caught 40 mutants with two timeout-killed and two unviable, with none missed. The RGB calibration set caught 78 mutants with five unviable and none missed. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
+      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the PAIR and RGB/JPEG decoders, RGB controls, RGB calibration parser, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, normalized global-shift diagnostic, map/Q parser/full reprojection, metric Z16/PGM, and robust depth-statistics focused sets catch all viable mutants exercised. The initial RGB set caught 40 mutants with two timeout-killed and two unviable, with none missed. The RGB calibration set caught 78 mutants with five unviable and none missed. The concurrent RGB-D transport set caught 14 mutants with one timeout-killed and one unviable, with none missed. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -105,9 +105,9 @@
       "id": "hardware-concurrent-rgbd-transport",
       "tier": "hardware",
       "environment": "POP 3 Plus on reachable LAN",
-      "command": "bounded direct dual-endpoint probe; not yet a public CLI contract",
+      "command": "cargo run --release -- --smoke-rgbd SCANNER_IP OUTPUT_PREFIX",
       "status": "PASS",
-      "claim": "Camera 21 and camera 50 served simultaneously after one shared configuration sequence: 23 complete depth envelopes and 26 complete RGB envelopes were recovered in six seconds. This qualifies concurrent transport, not paired-frame synchronization"
+      "claim": "The clean-room Rust command held camera 21 and camera 50 open until both parsers reached complete frame boundaries, recovered 647121 depth bytes and 115879 RGB bytes, and wrote visually checked 640x400 depth and 1280x800 RGB images. This qualifies concurrent transport, not paired-frame synchronization"
     },
     {
       "id": "metric-depth",

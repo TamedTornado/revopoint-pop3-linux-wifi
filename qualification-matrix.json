@@ -8,6 +8,7 @@
     "mutation_tests_pass": false,
     "hardware_pair_bytes_pass": true,
     "hardware_pair_frames_pass": true,
+    "experimental_stereo_depth_pass": true,
     "hardware_depth_z16_pass": false,
     "ros_depth_camera_pass": false,
     "rviz_live_acceptance_pass": false
@@ -51,7 +52,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "All 40 viable depth-stream/profile/scale, all 28 viable frame-envelope, all 38 viable depth-decoder/Z16, all 53 viable calibration, and all 41 viable ROS mapping mutants are caught; surviving HTTP and ROS runtime-adapter mutants remain open"
+      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the new PAIR decoder, emitter fail-closed paths, stereo matcher/PGM encoder, and map/Q parser/reprojection focused sets catch all viable mutants exercised. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -74,8 +75,8 @@
       "tier": "hardware",
       "environment": "POP 3 Plus and measured physical targets",
       "command": "not available",
-      "status": "BLOCKED",
-      "claim": "RevoScan itself requests format 4 PAIR at its camera start boundary; independently implemented host-side stereo reconstruction is now the missing depth stage"
+      "status": "PARTIAL",
+      "claim": "Clean-room rectification, bounded SAD disparity, and Q reprojection run end-to-end; a live wall capture reported an experimental 250.5 mm median within the target's rough 150-300 mm placement, but confidence filtering and measured-target accuracy remain open"
     },
     {
       "id": "ros-contract",

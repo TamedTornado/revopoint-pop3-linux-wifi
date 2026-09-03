@@ -111,18 +111,27 @@ cargo run --release -- --smoke-pair 192.168.8.245 /tmp/pop3
 ```
 
 The command captures exactly 1 MiB into a bounded reader, decompresses the
-first complete frame, saves `/tmp/pop3-left.pgm` and
-`/tmp/pop3-right.pgm`, closes the scanner stream, and exits. Open either PGM in
-a normal Linux image viewer to inspect the acquisition result. The command
-enables the scanner's LED master and infrared projector immediately before
-capture, waits 300 ms for illumination to settle, and turns both controls off
-again on success or failure.
+first complete frame, and saves raw left/right Y8 PGM images. It also downloads
+the scanner's read-only left/right map parameters, writes rectified PGM images,
+and writes an **experimental** block-matched disparity PGM. These are ordinary
+files that open in stock Linux image viewers; they are not vendor formats. The
+command enables the scanner's LED master and infrared projector immediately
+before capture, waits 300 ms for illumination to settle, and turns both controls
+off again on success or failure.
 
 Example output:
 
 ```text
-PAIR stream smoke passed: bytes=1048576, resolution=640x400, left=/tmp/pop3-left.pgm, right=/tmp/pop3-right.pgm
+PAIR stream smoke passed: bytes=1048576, resolution=640x400, left=/tmp/pop3-left.pgm, right=/tmp/pop3-right.pgm, left_rectified=/tmp/pop3-left-rectified.pgm, right_rectified=/tmp/pop3-right-rectified.pgm, disparity=/tmp/pop3-disparity.pgm, median_disparity_px=..., experimental_median_depth_mm=...
 ```
+
+The disparity image is currently a diagnostic, not qualified metric depth. It
+uses a bounded 0–160 pixel search and a 15×15 SAD support window. Occlusion,
+confidence, left/right consistency, and physical scale validation remain open.
+The reported depth applies the scanner's read-only Q reprojection matrix to the
+median disparity, including the calibration-to-stream resolution scale. It is
+labelled experimental until the noisy per-pixel result and a measured target
+pass the hardware qualification matrix.
 
 Offline network-boundary tests use loopback fixture servers and require no
 scanner:

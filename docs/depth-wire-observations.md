@@ -62,6 +62,14 @@ other words, RevoScan itself does not ask this network camera for Z16 at the
 acquisition boundary; its later processing pipeline derives depth from the
 binocular images.
 
+The camera library's later algorithm service confirms that separation. It logs
+left, right, match, and left/right-consistency error rates and dynamically loads
+`3dcameraAlg.dll` through the `algSdk.algLibPath` setting before creating its
+processing object. That model-specific dense algorithm DLL was not present in
+the unpacked RevoScan application examined here. This project therefore treats
+rectification, correspondence, consistency, and reprojection as an explicit
+clean-room boundary rather than copying vendor implementation code.
+
 Selector 2 is accepted but produced no bytes from `camera_id=21` in isolated
 hardware probes. That is no longer assumed to indicate a missing selector
 prerequisite: it may simply be an unused firmware path for this model.
@@ -79,6 +87,24 @@ both enabled and a 300 ms settling delay, the same bounded capture produced two
 bright, recognizable views of the physical target. The client disables the
 projector and master after every attempted capture; a fixture-server integration
 test also verifies cleanup when projector enablement is rejected.
+
+The scanner exposes 148-byte `mapparamL.bin` and `mapparamR.bin` calibration
+records. Each begins with calibration height, width, and a five-coefficient
+distortion count; it then contains camera intrinsics, Brown–Conrady distortion,
+and a 3×3 inverse rectification transform. Applying those records to a live
+640×400 PAIR capture produced the expected small black rectification borders.
+A whole-image horizontal comparison of the rectified wall target had its lowest
+error at approximately 14–15 half-resolution pixels, providing an independent
+sanity check that the epipolar direction is horizontal. Per-pixel SAD disparity
+is now emitted for diagnosis but remains visibly noisy on the nearly planar,
+low-texture target and is not treated as qualified depth.
+
+The accompanying 4×4 Q record follows the standard homogeneous reprojection
+shape. Scaling half-resolution disparity back to calibration resolution and
+dividing Q's Z numerator by its homogeneous W term produced a 250.5 mm median
+on a live wall capture whose physical distance was estimated only as 150–300
+mm. The broad agreement supports the interpretation but is intentionally not a
+metric acceptance result.
 
 The scanner's read-only `get_depth_reso` endpoint reports `curr-resolution` as
 `640x400x2`. That is also the total byte count for two Y8 planes: 512,000 bytes.

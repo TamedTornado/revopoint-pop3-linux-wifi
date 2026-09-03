@@ -15,6 +15,8 @@ pub mod pair_decode;
 #[cfg(feature = "ros2")]
 pub mod ros2_adapter;
 pub mod ros_camera;
+pub mod stereo_calibration;
+pub mod stereo_match;
 
 const VID: u16 = 0x2207;
 const PID: u16 = 0x110c;
@@ -353,6 +355,7 @@ fn run(write: bool, diagnose: bool) -> Result<(), Box<dyn Error>> {
 
 fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     const PREFIX_BYTES: usize = 1024 * 1024;
+    const MAXIMUM_DISPARITY: u16 = 160;
     let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
     let limits = http_stream::StreamLimits {
         connect_timeout: Duration::from_secs(3),
@@ -390,8 +393,42 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     }
     let pair =
         first_pair.ok_or_else(|| failure("bounded capture contained no complete PAIR frame"))?;
+    let maps = stereo_calibration::get_stereo_map_parameters(address, limits)?;
+    let reprojection = stereo_calibration::get_reprojection_matrix(address, limits)?;
+    let left_rectified =
+        stereo_calibration::rectify_y8(&pair.left, pair.width, pair.height, maps.left)?;
+    let right_rectified =
+        stereo_calibration::rectify_y8(&pair.right, pair.width, pair.height, maps.right)?;
+    let disparity = stereo_match::block_match_y8(
+        &left_rectified,
+        &right_rectified,
+        pair.width,
+        pair.height,
+        0..=MAXIMUM_DISPARITY,
+        7,
+    )?;
+    let mut valid_disparities = disparity
+        .values
+        .iter()
+        .copied()
+        .filter(|value| *value != u16::MAX)
+        .collect::<Vec<_>>();
+    valid_disparities.sort_unstable();
+    let median_disparity = valid_disparities
+        .get(valid_disparities.len() / 2)
+        .copied()
+        .ok_or_else(|| failure("block matcher produced no valid disparities"))?;
+    let disparity_scale = maps.left.calibration_width as f32 / pair.width as f32;
+    let experimental_median_depth_mm = reprojection
+        .depth_mm(f32::from(median_disparity), disparity_scale)
+        .ok_or_else(|| {
+            failure("median disparity cannot be reprojected to positive metric depth")
+        })?;
     let left_path = format!("{output_prefix}-left.pgm");
     let right_path = format!("{output_prefix}-right.pgm");
+    let left_rectified_path = format!("{output_prefix}-left-rectified.pgm");
+    let right_rectified_path = format!("{output_prefix}-right-rectified.pgm");
+    let disparity_path = format!("{output_prefix}-disparity.pgm");
     std::fs::write(
         &left_path,
         pair_decode::encode_y8_pgm(pair.width, pair.height, &pair.left)?,
@@ -400,8 +437,20 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         &right_path,
         pair_decode::encode_y8_pgm(pair.width, pair.height, &pair.right)?,
     )?;
+    std::fs::write(
+        &left_rectified_path,
+        pair_decode::encode_y8_pgm(pair.width, pair.height, &left_rectified)?,
+    )?;
+    std::fs::write(
+        &right_rectified_path,
+        pair_decode::encode_y8_pgm(pair.width, pair.height, &right_rectified)?,
+    )?;
+    std::fs::write(
+        &disparity_path,
+        stereo_match::encode_disparity_pgm(&disparity, MAXIMUM_DISPARITY)?,
+    )?;
     println!(
-        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}",
+        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}, left_rectified={left_rectified_path}, right_rectified={right_rectified_path}, disparity={disparity_path}, median_disparity_px={median_disparity}, experimental_median_depth_mm={experimental_median_depth_mm:.1}",
         pair.width, pair.height
     );
     Ok(())

@@ -79,6 +79,15 @@ Z16. Its two contiguous Y8 planes are now decoded explicitly. RevoScan's own
 confirming that metric depth is derived later on the host. Issue #4 must remain
 open until that stereo reconstruction boundary is independently implemented.
 
+First reconstruction slice: the 148-byte left/right map-parameter records are
+parsed and validated in clean-room Rust. The Y8 planes can be rectified using
+their Brown–Conrady coefficients and inverse rectification matrices. A bounded
+block matcher emits an experimental PGM disparity image for immediate inspection
+in a stock Linux viewer. The scanner's Q matrix is parsed and applied with the
+calibration-to-stream disparity scale; a live wall run returned an experimental
+median of 250.5 mm while the target was known only to be roughly 150–300 mm
+away. This is a sanity check, not yet accepted metric depth.
+
 ### 5. Establish metric meaning and calibration ([#5](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/5))
 
 Determine depth scale, invalid values, intrinsics, distortion, optical-frame

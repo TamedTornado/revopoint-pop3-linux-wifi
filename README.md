@@ -123,7 +123,7 @@ off again on success or failure.
 Example output:
 
 ```text
-PAIR stream smoke passed: bytes=1048576, resolution=640x400, left=/tmp/pop3-left.pgm, right=/tmp/pop3-right.pgm, left_rectified=/tmp/pop3-left-rectified.pgm, right_rectified=/tmp/pop3-right-rectified.pgm, disparity=/tmp/pop3-disparity.pgm, depth_mm=/tmp/pop3-depth-mm.pgm, valid_pixels=... (...%), median_disparity_px=..., experimental_median_depth_mm=..., depth_mad_mm=..., depth_p10_p90_mm=.....
+PAIR stream smoke passed: bytes=1048576, resolution=640x400, left=/tmp/pop3-left.pgm, right=/tmp/pop3-right.pgm, left_rectified=/tmp/pop3-left-rectified.pgm, right_rectified=/tmp/pop3-right-rectified.pgm, disparity=/tmp/pop3-disparity.pgm, depth_mm=/tmp/pop3-depth-mm.pgm, valid_pixels=... (...%), global_disparity_px=..., global_depth_mm=..., median_disparity_px=..., experimental_median_depth_mm=..., depth_mad_mm=..., depth_p10_p90_mm=.....
 ```
 
 The disparity image is currently a diagnostic, not qualified metric depth. It
@@ -137,6 +137,11 @@ per-pixel disparity, including the calibration-to-stream resolution scale. The
 16-bit PGM stores millimeters directly with zero for invalid pixels. It is
 labelled experimental until the per-pixel result and a measured target pass the
 hardware qualification matrix.
+
+The global values come from an independent normalized whole-image horizontal
+SAD sweep. They are diagnostic only: disagreement with the filtered per-pixel
+distribution helps distinguish calibration/sign errors from local correspondence
+ambiguity.
 
 Offline network-boundary tests use loopback fixture servers and require no
 scanner:

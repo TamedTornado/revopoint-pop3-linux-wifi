@@ -410,6 +410,8 @@ struct ReconstructedPair {
     right_rectified: Vec<u8>,
     disparity: stereo_match::DisparityMap,
     depth: depth_decode::DepthPlane,
+    global_disparity: u16,
+    global_depth_mm: f32,
 }
 
 fn reconstruct_pair(
@@ -421,6 +423,20 @@ fn reconstruct_pair(
         stereo_calibration::rectify_y8(&pair.left, pair.width, pair.height, maps.left)?;
     let right_rectified =
         stereo_calibration::rectify_y8(&pair.right, pair.width, pair.height, maps.right)?;
+    let global_disparity = stereo_match::global_sad_disparity_y8(
+        &left_rectified,
+        &right_rectified,
+        pair.width,
+        pair.height,
+        stereo_match::GlobalMatchParameters {
+            disparities: 0..=MAXIMUM_DISPARITY,
+            border: 15,
+        },
+    )?;
+    let disparity_scale = maps.left.calibration_width as f32 / pair.width as f32;
+    let global_depth_mm = reprojection
+        .depth_mm(f32::from(global_disparity), disparity_scale)
+        .ok_or_else(|| failure("global disparity cannot be reprojected to positive depth"))?;
     let disparity = stereo_match::block_match_y8_consistent(
         &left_rectified,
         &right_rectified,
@@ -445,6 +461,8 @@ fn reconstruct_pair(
         right_rectified,
         disparity,
         depth,
+        global_disparity,
+        global_depth_mm,
     })
 }
 
@@ -501,9 +519,11 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         stereo_depth::encode_z16_pgm(&reconstructed.depth)?,
     )?;
     println!(
-        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}, left_rectified={left_rectified_path}, right_rectified={right_rectified_path}, disparity={disparity_path}, depth_mm={depth_path}, valid_pixels={valid_pixels} ({valid_percent:.1}%), median_disparity_px={median_disparity}, experimental_median_depth_mm={:.1}, depth_mad_mm={:.1}, depth_p10_p90_mm={:.1}..{:.1}",
+        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}, left_rectified={left_rectified_path}, right_rectified={right_rectified_path}, disparity={disparity_path}, depth_mm={depth_path}, valid_pixels={valid_pixels} ({valid_percent:.1}%), global_disparity_px={}, global_depth_mm={:.1}, median_disparity_px={median_disparity}, experimental_median_depth_mm={:.1}, depth_mad_mm={:.1}, depth_p10_p90_mm={:.1}..{:.1}",
         pair.width,
         pair.height,
+        reconstructed.global_disparity,
+        reconstructed.global_depth_mm,
         depth_statistics.median_mm,
         depth_statistics.median_absolute_deviation_mm,
         depth_statistics.p10_mm,

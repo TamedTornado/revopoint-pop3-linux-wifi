@@ -1,7 +1,8 @@
 use revopoint_pop3_wifi::stereo_match::{
     block_match_y8, block_match_y8_consistent, block_match_y8_unique, costs_have_minimum_margin,
     encode_disparity_pgm, enforce_left_right_consistency, filter_disparity_consensus,
-    ConsistentMatchParameters, DisparityError, DisparityMap,
+    global_sad_disparity_y8, ConsistentMatchParameters, DisparityError, DisparityMap,
+    GlobalMatchParameters,
 };
 
 #[test]
@@ -26,6 +27,166 @@ fn recovers_a_known_horizontal_shift() {
             assert_eq!(map.at(x, y), Some(3), "pixel ({x},{y})");
         }
     }
+}
+
+#[test]
+fn global_match_recovers_the_dominant_horizontal_shift() {
+    let width = 24_u32;
+    let height = 9_u32;
+    let shift = 3_usize;
+    let left = (0..width as usize * height as usize)
+        .map(|index| ((index * 37 + index / width as usize * 19) % 251) as u8)
+        .collect::<Vec<_>>();
+    let mut right = vec![0_u8; left.len()];
+    for y in 0..height as usize {
+        for x in 0..width as usize - shift {
+            right[y * width as usize + x] = left[y * width as usize + x + shift];
+        }
+    }
+
+    let disparity = global_sad_disparity_y8(
+        &left,
+        &right,
+        width,
+        height,
+        GlobalMatchParameters {
+            disparities: 0..=6,
+            border: 1,
+        },
+    )
+    .expect("global disparity");
+
+    assert_eq!(disparity, 3);
+}
+
+#[test]
+fn global_match_rejects_invalid_layout_and_search_region() {
+    let image = vec![0_u8; 8 * 6];
+    let reversed_start = 4;
+    let reversed_end = 3;
+    let parameters = GlobalMatchParameters {
+        disparities: 0..=3,
+        border: 1,
+    };
+    assert!(global_sad_disparity_y8(&image[..47], &image, 8, 6, parameters.clone()).is_err());
+    assert!(global_sad_disparity_y8(&image, &image[..47], 8, 6, parameters.clone()).is_err());
+    assert!(global_sad_disparity_y8(&image, &image, 0, 6, parameters.clone()).is_err());
+    assert!(global_sad_disparity_y8(
+        &image,
+        &image,
+        8,
+        6,
+        GlobalMatchParameters {
+            disparities: reversed_start..=reversed_end,
+            border: 1,
+        },
+    )
+    .is_err());
+    assert!(global_sad_disparity_y8(
+        &image,
+        &image,
+        8,
+        6,
+        GlobalMatchParameters {
+            disparities: 0..=7,
+            border: 1,
+        },
+    )
+    .is_err());
+    assert!(global_sad_disparity_y8(
+        &image,
+        &image,
+        8,
+        6,
+        GlobalMatchParameters {
+            disparities: 0..=3,
+            border: 3,
+        },
+    )
+    .is_err());
+    let wide_image = vec![0_u8; 20 * 6];
+    assert!(global_sad_disparity_y8(
+        &wide_image,
+        &wide_image,
+        20,
+        6,
+        GlobalMatchParameters {
+            disparities: 0..=3,
+            border: 3,
+        },
+    )
+    .is_err());
+
+    let flat = vec![42_u8; 20 * 9];
+    assert_eq!(
+        global_sad_disparity_y8(
+            &flat,
+            &flat,
+            20,
+            9,
+            GlobalMatchParameters {
+                disparities: 0..=4,
+                border: 1,
+            },
+        )
+        .expect("flat global match"),
+        0,
+        "equal normalized costs retain the lowest disparity"
+    );
+}
+
+#[test]
+fn global_match_agrees_with_an_independent_direct_reference() {
+    let width = 17_usize;
+    let height = 9_usize;
+    for seed in 1..=24_usize {
+        let left = (0..width * height)
+            .map(|index| ((index * index * (seed + 3) + index * 43 + seed * 29) % 251) as u8)
+            .collect::<Vec<_>>();
+        let right = (0..left.len())
+            .map(|index| ((index * index * 31 + index * (seed + 5) + 101) % 253) as u8)
+            .collect::<Vec<_>>();
+
+        let actual = global_sad_disparity_y8(
+            &left,
+            &right,
+            width as u32,
+            height as u32,
+            GlobalMatchParameters {
+                disparities: 1..=5,
+                border: 2,
+            },
+        )
+        .expect("global match");
+        let expected = direct_global_match(&left, &right, width, height, 1..=5, 2);
+
+        assert_eq!(actual, expected, "seed {seed}");
+    }
+}
+
+fn direct_global_match(
+    left: &[u8],
+    right: &[u8],
+    width: usize,
+    height: usize,
+    disparities: std::ops::RangeInclusive<usize>,
+    border: usize,
+) -> u16 {
+    disparities
+        .map(|disparity| {
+            let differences = (border..height - border).flat_map(|y| {
+                (disparity + border..width - border).map(move |x| {
+                    u64::from(left[y * width + x].abs_diff(right[y * width + x - disparity]))
+                })
+            });
+            let (sum, count) = differences.fold((0_u64, 0_u64), |(sum, count), difference| {
+                (sum + difference, count + 1)
+            });
+            (sum as f64 / count as f64, disparity as u16)
+        })
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .expect("non-empty disparity range")
+        .1
 }
 
 #[test]

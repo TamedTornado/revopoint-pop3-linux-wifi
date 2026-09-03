@@ -97,6 +97,12 @@ filtered run kept 37,655 pixels (14.7%), with median 263 mm, median absolute
 deviation 9 mm, and a 234–272 mm 10th–90th percentile interval. That is a
 quantified failure on a roughly planar target, not a promoted result.
 
+An independent whole-frame normalized SAD sweep now reports the dominant shift
+beside the per-pixel result. On a subsequent capture it found 20 px (258.5 mm)
+while the filtered local median was 11 px (264 mm) with an 8 mm MAD. The correct
+sign and plausible global peak narrow the remaining problem to ambiguous local
+correspondence/regularization rather than another selector or byte-layout guess.
+
 ### 5. Establish metric meaning and calibration ([#5](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/5))
 
 Determine depth scale, invalid values, intrinsics, distortion, optical-frame

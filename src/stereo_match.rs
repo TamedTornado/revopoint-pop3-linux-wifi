@@ -19,6 +19,12 @@ pub struct ConsistentMatchParameters {
     pub consistency_tolerance: u16,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GlobalMatchParameters {
+    pub disparities: RangeInclusive<u16>,
+    pub border: u32,
+}
+
 impl DisparityMap {
     pub fn at(&self, x: u32, y: u32) -> Option<u16> {
         if x >= self.width || y >= self.height {
@@ -56,6 +62,48 @@ pub fn block_match_y8(
     radius: u32,
 ) -> Result<DisparityMap, DisparityError> {
     block_match_y8_impl(left, right, width, height, disparities, radius, None)
+}
+
+pub fn global_sad_disparity_y8(
+    left: &[u8],
+    right: &[u8],
+    width: u32,
+    height: u32,
+    parameters: GlobalMatchParameters,
+) -> Result<u16, DisparityError> {
+    let width = usize::try_from(width).map_err(|_| DisparityError)?;
+    let height = usize::try_from(height).map_err(|_| DisparityError)?;
+    let border = usize::try_from(parameters.border).map_err(|_| DisparityError)?;
+    let minimum_disparity = usize::from(*parameters.disparities.start());
+    let maximum_disparity = usize::from(*parameters.disparities.end());
+    let pixel_count = width.checked_mul(height).ok_or(DisparityError)?;
+    if pixel_count == 0
+        || left.len() != pixel_count
+        || right.len() != pixel_count
+        || border.checked_mul(2).is_none_or(|value| value >= height)
+        || maximum_disparity
+            .checked_add(border)
+            .is_none_or(|value| value >= width - border)
+    {
+        return Err(DisparityError);
+    }
+
+    let mut best: Option<(u128, u128, u16)> = None;
+    for disparity in minimum_disparity..=maximum_disparity {
+        let mut sum = 0_u128;
+        let mut count = 0_u128;
+        for y in border..height - border {
+            for x in disparity + border..width - border {
+                sum += u128::from(left[y * width + x].abs_diff(right[y * width + x - disparity]));
+                count += 1;
+            }
+        }
+        if best.is_none_or(|(best_sum, best_count, _)| sum * best_count < best_sum * count) {
+            best = Some((sum, count, disparity as u16));
+        }
+    }
+    best.map(|(_, _, disparity)| disparity)
+        .ok_or(DisparityError)
 }
 
 pub fn block_match_y8_unique(

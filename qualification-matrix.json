@@ -56,7 +56,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the new PAIR decoder, emitter fail-closed paths, stereo matcher/disparity encoder, map/Q parser/full reprojection, and metric Z16/PGM focused sets catch all viable mutants exercised. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
+      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the new PAIR decoder, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, map/Q parser/full reprojection, metric Z16/PGM, and robust depth-statistics focused sets catch all viable mutants exercised. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -80,7 +80,7 @@
       "environment": "POP 3 Plus and measured physical targets",
       "command": "not available",
       "status": "PARTIAL",
-      "claim": "Clean-room rectification, bounded SAD disparity, provisional uniqueness and left/right consistency filtering, and Q reprojection run end-to-end; a live wall capture retained 20.7% of pixels and reported an experimental 259.8 mm median within the target's rough 150-300 mm placement, but measured-target accuracy remains open"
+      "claim": "Clean-room rectification, bounded SAD disparity, uniqueness, left/right consistency, spatial consensus/median filtering, and Q reprojection run end-to-end; a live wall capture retained 14.7% of pixels with median 263 mm, MAD 9 mm, and p10-p90 234-272 mm, which quantifies rather than clears the planar failure"
     },
     {
       "id": "ros-contract",

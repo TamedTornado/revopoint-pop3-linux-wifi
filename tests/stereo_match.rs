@@ -1,7 +1,7 @@
 use revopoint_pop3_wifi::stereo_match::{
     block_match_y8, block_match_y8_consistent, block_match_y8_unique, costs_have_minimum_margin,
-    encode_disparity_pgm, enforce_left_right_consistency, ConsistentMatchParameters,
-    DisparityError, DisparityMap,
+    encode_disparity_pgm, enforce_left_right_consistency, filter_disparity_consensus,
+    ConsistentMatchParameters, DisparityError, DisparityMap,
 };
 
 #[test]
@@ -313,6 +313,71 @@ fn direct_match_unique(
         }
     }
     output
+}
+
+#[test]
+fn local_consensus_removes_isolated_disparity_outliers() {
+    let invalid = u16::MAX;
+    let map = DisparityMap {
+        width: 5,
+        height: 3,
+        values: vec![
+            invalid, invalid, 10, invalid, invalid, //
+            invalid, 10, 11, 10, invalid, //
+            50, invalid, invalid, invalid, invalid,
+        ],
+    };
+
+    let filtered = filter_disparity_consensus(&map, 1, 2, 2).expect("consensus map");
+
+    assert_eq!(filtered.at(2, 1), Some(10));
+    assert_eq!(filtered.at(0, 2), None);
+    assert_eq!(filtered.valid_count(), 4);
+
+    let one_neighbor = DisparityMap {
+        width: 3,
+        height: 1,
+        values: vec![10, 10, invalid],
+    };
+    let rejected = filter_disparity_consensus(&one_neighbor, 1, 2, 0).expect("one-neighbor map");
+    assert_eq!(rejected.valid_count(), 0);
+
+    let out_of_tolerance = DisparityMap {
+        width: 3,
+        height: 2,
+        values: vec![50, 60, invalid, 10, invalid, invalid],
+    };
+    let rejected = filter_disparity_consensus(&out_of_tolerance, 1, 2, 2).expect("outlier map");
+    assert_eq!(rejected.at(0, 0), None);
+
+    let median_fixture = DisparityMap {
+        width: 2,
+        height: 2,
+        values: vec![8, 9, 10, 11],
+    };
+    let smoothed = filter_disparity_consensus(&median_fixture, 1, 3, 3).expect("median fixture");
+    assert_eq!(smoothed.values, vec![10; 4]);
+}
+
+#[test]
+fn local_consensus_rejects_invalid_layout_and_parameters() {
+    let valid = DisparityMap {
+        width: 3,
+        height: 3,
+        values: vec![0; 9],
+    };
+    let malformed = DisparityMap {
+        values: vec![0; 8],
+        ..valid.clone()
+    };
+
+    assert!(filter_disparity_consensus(&malformed, 1, 1, 1).is_err());
+    assert!(filter_disparity_consensus(&valid, 0, 1, 1).is_err());
+    assert!(filter_disparity_consensus(&valid, 1, 0, 1).is_err());
+    assert!(filter_disparity_consensus(&valid, 1, 9, 1).is_err());
+    let exact_maximum = filter_disparity_consensus(&valid, 1, 8, 0).expect("maximum support map");
+    assert_eq!(exact_maximum.valid_count(), 1);
+    assert_eq!(exact_maximum.at(1, 1), Some(0));
 }
 
 #[test]

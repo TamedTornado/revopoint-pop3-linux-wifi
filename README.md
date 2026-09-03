@@ -123,13 +123,15 @@ off again on success or failure.
 Example output:
 
 ```text
-PAIR stream smoke passed: bytes=1048576, resolution=640x400, left=/tmp/pop3-left.pgm, right=/tmp/pop3-right.pgm, left_rectified=/tmp/pop3-left-rectified.pgm, right_rectified=/tmp/pop3-right-rectified.pgm, disparity=/tmp/pop3-disparity.pgm, depth_mm=/tmp/pop3-depth-mm.pgm, valid_pixels=... (...%), median_disparity_px=..., experimental_median_depth_mm=...
+PAIR stream smoke passed: bytes=1048576, resolution=640x400, left=/tmp/pop3-left.pgm, right=/tmp/pop3-right.pgm, left_rectified=/tmp/pop3-left-rectified.pgm, right_rectified=/tmp/pop3-right-rectified.pgm, disparity=/tmp/pop3-disparity.pgm, depth_mm=/tmp/pop3-depth-mm.pgm, valid_pixels=... (...%), median_disparity_px=..., experimental_median_depth_mm=..., depth_mad_mm=..., depth_p10_p90_mm=.....
 ```
 
 The disparity image is currently a diagnostic, not qualified metric depth. It
 uses a bounded 0–160 pixel search, a 15×15 SAD support window, a provisional 1%
 best-versus-runner-up cost margin, and a one-pixel left/right consistency check.
-Occlusion-aware filling and physical scale validation remain open.
+It then requires eight locally consistent neighbors in a 5×5 window and applies
+a local median. Occlusion-aware filling and physical scale validation remain
+open.
 The reported depth applies the scanner's read-only Q reprojection matrix to the
 per-pixel disparity, including the calibration-to-stream resolution scale. The
 16-bit PGM stores millimeters directly with zero for invalid pixels. It is

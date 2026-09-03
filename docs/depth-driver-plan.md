@@ -91,6 +91,12 @@ scales. A confidence-filtered live wall run kept
 while the target was known only to be roughly 150–300 mm away. This is a sanity
 check, not yet accepted metric depth.
 
+After RViz exposed separated lobes instead of a plane, a mutation-clean 5×5
+spatial-consensus/median filter and robust depth statistics were added. A live
+filtered run kept 37,655 pixels (14.7%), with median 263 mm, median absolute
+deviation 9 mm, and a 234–272 mm 10th–90th percentile interval. That is a
+quantified failure on a roughly planar target, not a promoted result.
+
 ### 5. Establish metric meaning and calibration ([#5](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/5))
 
 Determine depth scale, invalid values, intrinsics, distortion, optical-frame

@@ -269,6 +269,72 @@ pub fn enforce_left_right_consistency(
     })
 }
 
+pub fn filter_disparity_consensus(
+    map: &DisparityMap,
+    radius: u32,
+    minimum_support: usize,
+    tolerance: u16,
+) -> Result<DisparityMap, DisparityError> {
+    let width = usize::try_from(map.width).map_err(|_| DisparityError)?;
+    let height = usize::try_from(map.height).map_err(|_| DisparityError)?;
+    let radius = usize::try_from(radius).map_err(|_| DisparityError)?;
+    let pixel_count = width.checked_mul(height).ok_or(DisparityError)?;
+    let window_width = radius
+        .checked_mul(2)
+        .and_then(|diameter| diameter.checked_add(1))
+        .ok_or(DisparityError)?;
+    let maximum_support = window_width
+        .checked_mul(window_width)
+        .and_then(|area| area.checked_sub(1))
+        .ok_or(DisparityError)?;
+    if pixel_count == 0
+        || map.values.len() != pixel_count
+        || radius == 0
+        || minimum_support == 0
+        || minimum_support > maximum_support
+    {
+        return Err(DisparityError);
+    }
+
+    let mut values = vec![INVALID_DISPARITY; pixel_count];
+    let mut supported_disparities = Vec::with_capacity(maximum_support + 1);
+    for y in 0..height {
+        for x in 0..width {
+            let index = y * width + x;
+            let disparity = map.values[index];
+            if disparity == INVALID_DISPARITY {
+                continue;
+            }
+            let first_y = y.saturating_sub(radius);
+            let last_y = y.saturating_add(radius).min(height - 1);
+            let first_x = x.saturating_sub(radius);
+            let last_x = x.saturating_add(radius).min(width - 1);
+            supported_disparities.clear();
+            supported_disparities.push(disparity);
+            for neighbor_y in first_y..=last_y {
+                for neighbor_x in first_x..=last_x {
+                    if neighbor_x == x && neighbor_y == y {
+                        continue;
+                    }
+                    let neighbor = map.values[neighbor_y * width + neighbor_x];
+                    if neighbor != INVALID_DISPARITY && neighbor.abs_diff(disparity) <= tolerance {
+                        supported_disparities.push(neighbor);
+                    }
+                }
+            }
+            if supported_disparities.len() > minimum_support {
+                supported_disparities.sort_unstable();
+                values[index] = supported_disparities[supported_disparities.len() / 2];
+            }
+        }
+    }
+    Ok(DisparityMap {
+        width: map.width,
+        height: map.height,
+        values,
+    })
+}
+
 fn reverse_rows<T: Copy>(values: &[T], width: usize) -> Vec<T> {
     values
         .chunks_exact(width)

@@ -433,6 +433,7 @@ fn reconstruct_pair(
             consistency_tolerance: 1,
         },
     )?;
+    let disparity = stereo_match::filter_disparity_consensus(&disparity, 2, 8, 3)?;
     let depth = stereo_depth::reproject_z16(
         &disparity,
         reprojection,
@@ -468,20 +469,7 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         .get(valid_disparities.len() / 2)
         .copied()
         .ok_or_else(|| failure("block matcher produced no valid disparities"))?;
-    let mut valid_depths = reconstructed
-        .depth
-        .bytes
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|sample| u16::from_le_bytes(*sample))
-        .filter(|sample| *sample != 0)
-        .collect::<Vec<_>>();
-    valid_depths.sort_unstable();
-    let experimental_median_depth_mm = valid_depths
-        .get(valid_depths.len() / 2)
-        .copied()
-        .ok_or_else(|| failure("reprojection produced no positive metric depths"))?;
+    let depth_statistics = stereo_depth::depth_z_statistics(&reconstructed.depth)?;
     let left_path = format!("{output_prefix}-left.pgm");
     let right_path = format!("{output_prefix}-right.pgm");
     let left_rectified_path = format!("{output_prefix}-left-rectified.pgm");
@@ -513,8 +501,13 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         stereo_depth::encode_z16_pgm(&reconstructed.depth)?,
     )?;
     println!(
-        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}, left_rectified={left_rectified_path}, right_rectified={right_rectified_path}, disparity={disparity_path}, depth_mm={depth_path}, valid_pixels={valid_pixels} ({valid_percent:.1}%), median_disparity_px={median_disparity}, experimental_median_depth_mm={experimental_median_depth_mm}",
-        pair.width, pair.height
+        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}, left_rectified={left_rectified_path}, right_rectified={right_rectified_path}, disparity={disparity_path}, depth_mm={depth_path}, valid_pixels={valid_pixels} ({valid_percent:.1}%), median_disparity_px={median_disparity}, experimental_median_depth_mm={:.1}, depth_mad_mm={:.1}, depth_p10_p90_mm={:.1}..{:.1}",
+        pair.width,
+        pair.height,
+        depth_statistics.median_mm,
+        depth_statistics.median_absolute_deviation_mm,
+        depth_statistics.p10_mm,
+        depth_statistics.p90_mm
     );
     Ok(())
 }

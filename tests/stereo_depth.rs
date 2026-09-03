@@ -1,6 +1,6 @@
 use revopoint_pop3_wifi::depth_decode::{DepthEncoding, DepthPlane};
 use revopoint_pop3_wifi::stereo_calibration::ReprojectionMatrix;
-use revopoint_pop3_wifi::stereo_depth::{encode_z16_pgm, reproject_z16};
+use revopoint_pop3_wifi::stereo_depth::{depth_z_statistics, encode_z16_pgm, reproject_z16};
 use revopoint_pop3_wifi::stereo_match::DisparityMap;
 
 fn q_fixture() -> ReprojectionMatrix {
@@ -171,5 +171,78 @@ fn encodes_big_endian_sixteen_bit_pgm_for_linux_viewers() {
         },
     ] {
         assert!(encode_z16_pgm(&invalid).is_err());
+    }
+}
+
+#[test]
+fn reports_robust_planar_depth_statistics_without_invalid_zero() {
+    let depth = DepthPlane {
+        width: 5,
+        height: 1,
+        stride_bytes: 10,
+        encoding: DepthEncoding::Z16LittleEndian,
+        millimeters_per_unit: 1.0,
+        bytes: [0_u16, 100, 101, 102, 200].map(u16::to_le_bytes).concat(),
+    };
+
+    let statistics = depth_z_statistics(&depth).expect("depth statistics");
+
+    assert_eq!(statistics.valid_samples, 4);
+    assert_eq!(statistics.median_mm, 102.0);
+    assert_eq!(statistics.median_absolute_deviation_mm, 2.0);
+    assert_eq!(statistics.p10_mm, 100.0);
+    assert_eq!(statistics.p90_mm, 102.0);
+
+    let scaled = DepthPlane {
+        width: 5,
+        height: 1,
+        stride_bytes: 10,
+        encoding: DepthEncoding::Z16LittleEndian,
+        millimeters_per_unit: 2.0,
+        bytes: [0_u16, 100, 101, 102, 200].map(u16::to_le_bytes).concat(),
+    };
+    let scaled_statistics = depth_z_statistics(&scaled).expect("scaled statistics");
+    assert_eq!(scaled_statistics.median_mm, 204.0);
+    assert_eq!(scaled_statistics.median_absolute_deviation_mm, 4.0);
+    assert_eq!(scaled_statistics.p10_mm, 200.0);
+    assert_eq!(scaled_statistics.p90_mm, 204.0);
+
+    let empty = DepthPlane {
+        bytes: vec![0; 10],
+        ..depth
+    };
+    assert!(depth_z_statistics(&empty).is_err());
+
+    for invalid in [
+        DepthPlane {
+            stride_bytes: 8,
+            ..scaled
+        },
+        DepthPlane {
+            width: 5,
+            height: 1,
+            stride_bytes: 10,
+            encoding: DepthEncoding::Z16LittleEndian,
+            millimeters_per_unit: 2.0,
+            bytes: vec![1; 8],
+        },
+        DepthPlane {
+            width: 5,
+            height: 1,
+            stride_bytes: 10,
+            encoding: DepthEncoding::Z16LittleEndian,
+            millimeters_per_unit: f32::NAN,
+            bytes: vec![1; 10],
+        },
+        DepthPlane {
+            width: 5,
+            height: 1,
+            stride_bytes: 10,
+            encoding: DepthEncoding::Z16LittleEndian,
+            millimeters_per_unit: 0.0,
+            bytes: vec![1; 10],
+        },
+    ] {
+        assert!(depth_z_statistics(&invalid).is_err());
     }
 }

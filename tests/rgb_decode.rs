@@ -18,17 +18,19 @@ fn reads_dimensions_from_a_bounded_jpeg_frame() {
     assert_eq!(information.width, 1280);
     assert_eq!(information.height, 800);
     assert_eq!(information.encoded_len, jpeg(1280, 800).len());
+    assert_eq!(information.device_timestamp_ms, None);
 }
 
 #[test]
 fn separates_the_observed_four_byte_transport_trailer() {
     let mut frame = jpeg(1280, 800);
     let jpeg_len = frame.len();
-    frame.extend_from_slice(&[0x44, 0x83, 0x25, 0x01]);
+    frame.extend_from_slice(&19_235_652_u32.to_le_bytes());
 
     let information = inspect_jpeg(&frame).expect("JPEG with transport trailer");
 
     assert_eq!(information.encoded_len, jpeg_len);
+    assert_eq!(information.device_timestamp_ms, Some(19_235_652));
 }
 
 #[test]

@@ -145,12 +145,16 @@ The first turntable prerequisite—independent RGB acquisition—is also availab
 
 ```sh
 cargo run --release -- --smoke-rgb 192.168.8.245 /tmp/pop3
+cargo run --release -- --inspect-rgb-calibration 192.168.8.245
 ```
 
 This uses the scanner's 1280×800 RGB stream and writes a validated ordinary
-JPEG to `/tmp/pop3-rgb.jpg`. The driver strips the observed four-byte transport
-trailer rather than leaving non-JPEG bytes in the output. Depth/RGB temporal
-synchronization and registration are deliberately not claimed yet.
+JPEG to `/tmp/pop3-rgb.jpg`. The driver separates the little-endian millisecond
+timestamp that follows the JPEG rather than leaving non-JPEG bytes in the
+output. The calibration command reads and validates the scanner's RGB
+intrinsics, distortion, and left-depth-camera-to-RGB transform. Concurrent
+transport has been demonstrated, but the clean-room driver does not yet claim
+paired RGB-D frames.
 
 The disparity image is currently a diagnostic, not qualified metric depth. It
 uses a bounded 0–160 pixel search, a 15×15 SAD support window, a provisional 1%

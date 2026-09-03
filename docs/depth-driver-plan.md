@@ -159,10 +159,13 @@ phase remains partial rather than complete.
 In progress: a black-box trace identified the 1280×800 RGB profile, RGB sensor
 enable control, free-running trigger requirement, and camera-50 media endpoint.
 The clean-room Rust path now recovers envelope-delimited JPEG frames, validates
-their dimensions, separates an observed four-byte post-JPEG transport trailer,
-and writes an ordinary JPEG. A live smoke produced a recognizable 1280×800 wall
-image. RGB/depth synchronization, registration, calibration, archive format,
-turntable angle metadata, masking, and dataset adapters remain open.
+their dimensions, separates their little-endian millisecond timestamp, and
+writes an ordinary JPEG. A live smoke produced a recognizable 1280×800 wall
+image. The scanner also served both media endpoints concurrently, and the Rust
+path now downloads and validates RGB intrinsics, five distortion coefficients,
+and the left-depth-camera-to-RGB transform. Pairing policy, registration,
+archive format, turntable angle metadata, masking, and dataset adapters remain
+open.
 
 ## Red-green workflow
 

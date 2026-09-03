@@ -6,6 +6,7 @@ pub struct JpegInformation {
     pub width: u16,
     pub height: u16,
     pub encoded_len: usize,
+    pub device_timestamp_ms: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -20,10 +21,17 @@ impl Display for JpegError {
 impl Error for JpegError {}
 
 pub fn inspect_jpeg(bytes: &[u8]) -> Result<JpegInformation, JpegError> {
-    let encoded_len = if bytes.ends_with(&[0xff, 0xd9]) {
-        bytes.len()
+    let (encoded_len, device_timestamp_ms) = if bytes.ends_with(&[0xff, 0xd9]) {
+        (bytes.len(), None)
     } else if bytes.len() >= 6 && bytes[bytes.len() - 6..bytes.len() - 4] == [0xff, 0xd9] {
-        bytes.len() - 4
+        (
+            bytes.len() - 4,
+            Some(u32::from_le_bytes(
+                bytes[bytes.len() - 4..]
+                    .try_into()
+                    .expect("four-byte RGB timestamp"),
+            )),
+        )
     } else {
         return Err(JpegError);
     };
@@ -71,6 +79,7 @@ pub fn inspect_jpeg(bytes: &[u8]) -> Result<JpegInformation, JpegError> {
                 width,
                 height,
                 encoded_len,
+                device_timestamp_ms,
             });
         }
         if marker == 0xda {

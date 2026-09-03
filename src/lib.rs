@@ -12,6 +12,7 @@ pub mod depth_stream;
 pub mod frame_envelope;
 pub mod http_stream;
 pub mod pair_decode;
+pub mod rgb_calibration;
 pub mod rgb_decode;
 pub mod rgb_stream;
 #[cfg(feature = "ros2")]
@@ -658,6 +659,31 @@ fn smoke_rgb(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn inspect_rgb_calibration(ip: &str) -> Result<(), Box<dyn Error>> {
+    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let calibration = rgb_calibration::get_rgb_calibration(address, network_limits())?;
+    let intrinsics = calibration.intrinsics;
+    println!(
+        "RGB intrinsics: calibration={}x{}, fx={}, fy={}, cx={}, cy={}",
+        intrinsics.calibration_width,
+        intrinsics.calibration_height,
+        intrinsics.fx,
+        intrinsics.fy,
+        intrinsics.cx,
+        intrinsics.cy
+    );
+    println!("RGB distortion: {:?}", calibration.distortion.coefficients);
+    println!(
+        "Left-to-RGB rotation (column-major): {:?}",
+        calibration.left_to_rgb.rotation
+    );
+    println!(
+        "Left-to-RGB translation (mm): {:?}",
+        calibration.left_to_rgb.translation_mm
+    );
+    Ok(())
+}
+
 #[cfg(feature = "ros2")]
 fn ros2_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     use rclrs::CreateBasicExecutor;
@@ -747,6 +773,15 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 }
             };
         }
+        [argument, ip] if argument == "--inspect-rgb-calibration" => {
+            return match inspect_rgb_calibration(ip) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
         [argument, ip] if argument == "--ros2-depth" => {
             return match ros2_depth(ip) {
                 Ok(()) => 0,
@@ -757,20 +792,23 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             }
         }
         [argument] if argument == "--help" || argument == "-h" => {
-            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
             println!("  --diagnose    Report scanner-side Wi-Fi diagnostics over USB");
             println!("  --smoke-depth IP OUTPUT_PREFIX  Save device-computed depth and infrared PGM images");
             println!("  --smoke-rgb IP OUTPUT_PREFIX  Save one validated RGB JPEG image");
+            println!(
+                "  --inspect-rgb-calibration IP  Print RGB intrinsics and left-to-RGB transform"
+            );
             println!("  --smoke-pair IP OUTPUT_PREFIX  Save left/right infrared PGM images");
             println!("  --ros2-depth IP  Publish 20 experimental reconstructed ROS 2 frames");
             println!("  -h, --help    Show this help");
             return 0;
         }
         _ => {
-            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             return 2;
         }
     };

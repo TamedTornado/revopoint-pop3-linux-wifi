@@ -15,6 +15,8 @@
     "experimental_rviz_cloud_display_pass": true,
     "hardware_depth_z16_pass": true,
     "hardware_rgb_jpeg_pass": true,
+    "hardware_rgb_calibration_pass": true,
+    "hardware_concurrent_rgbd_transport_pass": true,
     "ros_depth_camera_pass": true,
     "rviz_live_acceptance_pass": false
   },
@@ -57,7 +59,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the PAIR and RGB/JPEG decoders, RGB controls, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, normalized global-shift diagnostic, map/Q parser/full reprojection, metric Z16/PGM, and robust depth-statistics focused sets catch all viable mutants exercised. The RGB set caught 40 mutants with two timeout-killed and two unviable, with none missed. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
+      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the PAIR and RGB/JPEG decoders, RGB controls, RGB calibration parser, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, normalized global-shift diagnostic, map/Q parser/full reprojection, metric Z16/PGM, and robust depth-statistics focused sets catch all viable mutants exercised. The initial RGB set caught 40 mutants with two timeout-killed and two unviable, with none missed. The RGB calibration set caught 78 mutants with five unviable and none missed. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -89,7 +91,23 @@
       "environment": "POP 3 Plus on reachable LAN",
       "command": "cargo run --release -- --smoke-rgb SCANNER_IP OUTPUT_PREFIX",
       "status": "PASS",
-      "claim": "The bounded Rust path recovered a complete camera-50 RGB envelope, validated a baseline 1280x800 JPEG, removed the observed four-byte post-EOI transport trailer, and wrote a recognizable ordinary JPEG of the physical wall target"
+      "claim": "The bounded Rust path recovered a complete camera-50 RGB envelope, validated a baseline 1280x800 JPEG, separated its little-endian millisecond timestamp, and wrote a recognizable ordinary JPEG of the physical wall target"
+    },
+    {
+      "id": "hardware-rgb-calibration",
+      "tier": "hardware",
+      "environment": "POP 3 Plus on reachable LAN",
+      "command": "cargo run --release -- --inspect-rgb-calibration SCANNER_IP",
+      "status": "PASS",
+      "claim": "The Rust path downloaded and validated the live 1280x800 RGB intrinsics, five distortion coefficients, and the 3x3 plus translation left-depth-camera-to-RGB transform"
+    },
+    {
+      "id": "hardware-concurrent-rgbd-transport",
+      "tier": "hardware",
+      "environment": "POP 3 Plus on reachable LAN",
+      "command": "bounded direct dual-endpoint probe; not yet a public CLI contract",
+      "status": "PASS",
+      "claim": "Camera 21 and camera 50 served simultaneously after one shared configuration sequence: 23 complete depth envelopes and 26 complete RGB envelopes were recovered in six seconds. This qualifies concurrent transport, not paired-frame synchronization"
     },
     {
       "id": "metric-depth",

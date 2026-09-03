@@ -116,9 +116,11 @@ Add a feature-gated Rust ROS 2 Jazzy adapter publishing synchronized
 `sensor_msgs/Image` and `sensor_msgs/CameraInfo` messages with sensor-data QoS.
 Test exact message fields using a real ROS subscriber boundary.
 
-The offline Z16-to-ROS mapping contract remains tested, but live publication is
-disabled. The prior live run consumed PAIR bytes mislabeled as Z16 and is not
-valid depth evidence.
+The offline Z16-to-ROS mapping contract remains tested. Live publication is now
+restored only for the independently reconstructed plane and is labelled
+experimental. A bounded hardware run published all 20 requested frames; a real
+ROS subscriber received a 640-wide `32FC1` image. This validates the live
+message boundary but not metric accuracy.
 
 ### 7. Qualify the stock Linux application path ([#7](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/7))
 
@@ -129,7 +131,11 @@ orientation, shutdown, and restart.
 
 Corrected status: the ROS graph and RViz plumbing worked, but its live input was
 not depth. The V-shaped cloud was a useful falsification signal, not an
-acceptance receipt. This phase returns to blocked-on-depth status.
+acceptance receipt. The corrected reconstruction now drives stock
+`depth_image_proc`: a subscriber received a 640-wide organized `PointCloud2`,
+and RViz2 displayed the live reconstructed depth image. The cloud has not yet
+passed visual geometry or measured-target acceptance, so this phase remains
+partial rather than complete.
 
 ### 8. Continue into turntable RGB-D capture ([#8](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/8))
 

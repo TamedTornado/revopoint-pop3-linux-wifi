@@ -150,6 +150,32 @@ live acquisition because doing so would relabel PAIR pixels as metric depth.
 The independently established envelope is documented in
 [`docs/depth-wire-observations.md`](docs/depth-wire-observations.md).
 
+## Experimental ROS 2 / RViz path
+
+This path deliberately retains the `experimental` label until measured-target
+qualification. On Ubuntu 24.04 with ROS 2 Jazzy:
+
+```sh
+source /opt/ros/jazzy/setup.bash
+cargo run --release --features ros2 -- --ros2-depth 192.168.8.245
+```
+
+The bounded command publishes 20 reconstructed `32FC1` frames and matching
+camera information on `/depth/image_rect` and `/depth/camera_info`. In separate
+terminals, stock ROS tooling can derive the organized cloud and display both:
+
+```sh
+source /opt/ros/jazzy/setup.bash
+ros2 run depth_image_proc point_cloud_xyz_node --ros-args \
+  -r image_rect:=/depth/image_rect -r camera_info:=/depth/camera_info
+rviz2 -d config/pop3-depth.rviz
+```
+
+A real-hardware run delivered all 20 frames, a ROS subscriber observed image
+width 640, stock `depth_image_proc` emitted a 640-wide `PointCloud2`, and RViz2
+displayed the reconstructed depth image. This verifies plumbing, not geometric
+accuracy. The cloud still requires visual and measured-target acceptance.
+
 ## Important limitations
 
 - Only WPA2-PSK networks are currently generated.

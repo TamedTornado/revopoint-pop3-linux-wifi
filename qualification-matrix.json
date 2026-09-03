@@ -9,6 +9,9 @@
     "hardware_pair_bytes_pass": true,
     "hardware_pair_frames_pass": true,
     "experimental_stereo_depth_pass": true,
+    "experimental_ros_depth_pass": true,
+    "experimental_depth_image_proc_pass": true,
+    "experimental_rviz_depth_image_pass": true,
     "hardware_depth_z16_pass": false,
     "ros_depth_camera_pass": false,
     "rviz_live_acceptance_pass": false
@@ -84,23 +87,23 @@
       "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
       "command": "cargo test --features ros2 --test ros2_dynamic_messages",
       "status": "PARTIAL",
-      "claim": "Offline runtime message construction passes; live publication is disabled because genuine Z16 is not acquired"
+      "claim": "Offline runtime message construction passes; corrected live publication delivered 20 reconstructed frames and a subscriber observed a 640-wide 32FC1 image, but the reconstructed metric plane remains unqualified"
     },
     {
       "id": "depth-image-proc",
       "tier": "ros-integration",
       "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
       "command": "ros2 run depth_image_proc point_cloud_xyz_node --ros-args -r image_rect:=/depth/image_rect -r camera_info:=/depth/camera_info",
-      "status": "BLOCKED",
-      "claim": "The previous non-empty PointCloud2 was generated from PAIR intensities mislabeled as Z16 and is invalid; retry after genuine depth acquisition"
+      "status": "PARTIAL",
+      "claim": "Stock depth_image_proc emitted a 640-wide organized PointCloud2 from corrected reconstructed depth; visual cloud geometry and measured-target accuracy remain unaccepted"
     },
     {
       "id": "rviz-hardware",
       "tier": "manual-hardware",
       "environment": "POP 3 Plus, turntable, ROS 2 Jazzy, RViz2",
       "command": "rviz2 -d config/pop3-depth.rviz",
-      "status": "BLOCKED",
-      "claim": "The previous V-shaped cloud was a false-depth artifact; no live metric visualization claim remains"
+      "status": "PARTIAL",
+      "claim": "RViz2 displayed the corrected live reconstructed depth image; the point cloud has not yet passed visual geometry or measured-target acceptance"
     }
   ]
 }

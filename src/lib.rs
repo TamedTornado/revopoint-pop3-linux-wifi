@@ -354,49 +354,69 @@ fn run(write: bool, diagnose: bool) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
-    const PREFIX_BYTES: usize = 1024 * 1024;
-    const MAXIMUM_DISPARITY: u16 = 160;
-    const MINIMUM_MATCH_MARGIN_PERCENT: u16 = 1;
-    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
-    let limits = http_stream::StreamLimits {
+const PAIR_PREFIX_BYTES: usize = 1024 * 1024;
+const MAXIMUM_DISPARITY: u16 = 160;
+const MINIMUM_MATCH_MARGIN_PERCENT: u16 = 1;
+
+fn network_limits() -> http_stream::StreamLimits {
+    http_stream::StreamLimits {
         connect_timeout: Duration::from_secs(3),
         idle_timeout: Duration::from_secs(3),
         total_timeout: Duration::from_secs(15),
         max_header_bytes: 16 * 1024,
         max_body_bytes: 2 * 1024 * 1024,
-    };
+    }
+}
+
+fn capture_pair_frame(
+    address: SocketAddr,
+    limits: http_stream::StreamLimits,
+) -> Result<(usize, pair_decode::Y8Pair), Box<dyn Error>> {
     let mut parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
     let mut first_pair = None;
     let mut frame_error: Option<Box<dyn Error>> = None;
-    let received = depth_stream::capture_pair_prefix(address, limits, PREFIX_BYTES, |chunk| {
-        if first_pair.is_some() || frame_error.is_some() {
-            return;
-        }
-        match parser.push(chunk) {
-            Ok(frames) => {
-                if let Some(frame) = frames.into_iter().next() {
-                    match depth_decode::decode_quicklz(&frame, 2 * 1024 * 1024)
-                        .map_err(|error| Box::new(error) as Box<dyn Error>)
-                        .and_then(|decoded| {
-                            pair_decode::decode_y8_pair(decoded.bytes, 640, 400)
-                                .map_err(|error| Box::new(error) as Box<dyn Error>)
-                        }) {
-                        Ok(pair) => first_pair = Some(pair),
-                        Err(error) => frame_error = Some(error),
+    let received =
+        depth_stream::capture_pair_prefix(address, limits, PAIR_PREFIX_BYTES, |chunk| {
+            if first_pair.is_some() || frame_error.is_some() {
+                return;
+            }
+            match parser.push(chunk) {
+                Ok(frames) => {
+                    if let Some(frame) = frames.into_iter().next() {
+                        match depth_decode::decode_quicklz(&frame, 2 * 1024 * 1024)
+                            .map_err(|error| Box::new(error) as Box<dyn Error>)
+                            .and_then(|decoded| {
+                                pair_decode::decode_y8_pair(decoded.bytes, 640, 400)
+                                    .map_err(|error| Box::new(error) as Box<dyn Error>)
+                            }) {
+                            Ok(pair) => first_pair = Some(pair),
+                            Err(error) => frame_error = Some(error),
+                        }
                     }
                 }
+                Err(error) => frame_error = Some(Box::new(error)),
             }
-            Err(error) => frame_error = Some(Box::new(error)),
-        }
-    })?;
+        })?;
     if let Some(error) = frame_error {
         return Err(error);
     }
     let pair =
         first_pair.ok_or_else(|| failure("bounded capture contained no complete PAIR frame"))?;
-    let maps = stereo_calibration::get_stereo_map_parameters(address, limits)?;
-    let reprojection = stereo_calibration::get_reprojection_matrix(address, limits)?;
+    Ok((received, pair))
+}
+
+struct ReconstructedPair {
+    left_rectified: Vec<u8>,
+    right_rectified: Vec<u8>,
+    disparity: stereo_match::DisparityMap,
+    depth: depth_decode::DepthPlane,
+}
+
+fn reconstruct_pair(
+    pair: &pair_decode::Y8Pair,
+    maps: stereo_calibration::StereoMapParameters,
+    reprojection: stereo_calibration::ReprojectionMatrix,
+) -> Result<ReconstructedPair, Box<dyn Error>> {
     let left_rectified =
         stereo_calibration::rectify_y8(&pair.left, pair.width, pair.height, maps.left)?;
     let right_rectified =
@@ -413,6 +433,28 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
             consistency_tolerance: 1,
         },
     )?;
+    let depth = stereo_depth::reproject_z16(
+        &disparity,
+        reprojection,
+        maps.left.calibration_width,
+        maps.left.calibration_height,
+    )?;
+    Ok(ReconstructedPair {
+        left_rectified,
+        right_rectified,
+        disparity,
+        depth,
+    })
+}
+
+fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
+    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let limits = network_limits();
+    let (received, pair) = capture_pair_frame(address, limits)?;
+    let maps = stereo_calibration::get_stereo_map_parameters(address, limits)?;
+    let reprojection = stereo_calibration::get_reprojection_matrix(address, limits)?;
+    let reconstructed = reconstruct_pair(&pair, maps, reprojection)?;
+    let disparity = &reconstructed.disparity;
     let valid_pixels = disparity.valid_count();
     let valid_percent = valid_pixels as f64 * 100.0 / disparity.values.len() as f64;
     let mut valid_disparities = disparity
@@ -426,13 +468,8 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         .get(valid_disparities.len() / 2)
         .copied()
         .ok_or_else(|| failure("block matcher produced no valid disparities"))?;
-    let depth = stereo_depth::reproject_z16(
-        &disparity,
-        reprojection,
-        maps.left.calibration_width,
-        maps.left.calibration_height,
-    )?;
-    let mut valid_depths = depth
+    let mut valid_depths = reconstructed
+        .depth
         .bytes
         .as_chunks::<2>()
         .0
@@ -461,22 +498,80 @@ fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     )?;
     std::fs::write(
         &left_rectified_path,
-        pair_decode::encode_y8_pgm(pair.width, pair.height, &left_rectified)?,
+        pair_decode::encode_y8_pgm(pair.width, pair.height, &reconstructed.left_rectified)?,
     )?;
     std::fs::write(
         &right_rectified_path,
-        pair_decode::encode_y8_pgm(pair.width, pair.height, &right_rectified)?,
+        pair_decode::encode_y8_pgm(pair.width, pair.height, &reconstructed.right_rectified)?,
     )?;
     std::fs::write(
         &disparity_path,
-        stereo_match::encode_disparity_pgm(&disparity, MAXIMUM_DISPARITY)?,
+        stereo_match::encode_disparity_pgm(disparity, MAXIMUM_DISPARITY)?,
     )?;
-    std::fs::write(&depth_path, stereo_depth::encode_z16_pgm(&depth)?)?;
+    std::fs::write(
+        &depth_path,
+        stereo_depth::encode_z16_pgm(&reconstructed.depth)?,
+    )?;
     println!(
         "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}, left_rectified={left_rectified_path}, right_rectified={right_rectified_path}, disparity={disparity_path}, depth_mm={depth_path}, valid_pixels={valid_pixels} ({valid_percent:.1}%), median_disparity_px={median_disparity}, experimental_median_depth_mm={experimental_median_depth_mm}",
         pair.width, pair.height
     );
     Ok(())
+}
+
+#[cfg(feature = "ros2")]
+fn ros2_depth(ip: &str) -> Result<(), Box<dyn Error>> {
+    use rclrs::CreateBasicExecutor;
+
+    const BATCHES: usize = 20;
+    let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
+    let limits = network_limits();
+    let maps = stereo_calibration::get_stereo_map_parameters(address, limits)?;
+    let reprojection = stereo_calibration::get_reprojection_matrix(address, limits)?;
+    let intrinsics =
+        calibration::get_depth_intrinsics(address, limits)?.for_resolution(640, 400)?;
+    let context = rclrs::Context::default();
+    let executor = context.create_basic_executor();
+    let node = executor.create_node("revopoint_pop3_depth")?;
+    let publisher = ros2_adapter::Ros2CameraPublisher::new(&node)?;
+    println!(
+        "Publishing {BATCHES} experimental reconstructed frames on depth/image_rect and depth/camera_info"
+    );
+    thread::sleep(Duration::from_secs(1));
+
+    for batch in 0..BATCHES {
+        let (_, pair) = capture_pair_frame(address, limits)?;
+        let reconstructed = reconstruct_pair(&pair, maps, reprojection)?;
+        let frame = ros_camera::map_depth_camera(
+            reconstructed.depth,
+            intrinsics,
+            current_ros_time()?,
+            "pop3_depth_optical_frame",
+        )?;
+        publisher.publish(frame)?;
+        println!(
+            "published experimental reconstructed frame {}/{BATCHES}",
+            batch + 1
+        );
+    }
+    Ok(())
+}
+
+#[cfg(feature = "ros2")]
+fn current_ros_time() -> Result<ros_camera::RosTime, Box<dyn Error>> {
+    let elapsed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
+    Ok(ros_camera::RosTime {
+        sec: i32::try_from(elapsed.as_secs())
+            .map_err(|_| failure("current UNIX timestamp exceeds ROS Time.sec"))?,
+        nanosec: elapsed.subsec_nanos(),
+    })
+}
+
+#[cfg(not(feature = "ros2"))]
+fn ros2_depth(_ip: &str) -> Result<(), Box<dyn Error>> {
+    Err(failure(
+        "ROS 2 support is disabled; source Jazzy and rebuild with --features ros2",
+    ))
 }
 
 pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
@@ -498,18 +593,28 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 }
             }
         }
+        [argument, ip] if argument == "--ros2-depth" => {
+            return match ros2_depth(ip) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            }
+        }
         [argument] if argument == "--help" || argument == "-h" => {
-            println!("Usage: {program} [--write | --diagnose | --smoke-pair IP OUTPUT_PREFIX]");
+            println!("Usage: {program} [--write | --diagnose | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
             println!("  --diagnose    Report scanner-side Wi-Fi diagnostics over USB");
             println!("  --smoke-pair IP OUTPUT_PREFIX  Save left/right infrared PGM images");
+            println!("  --ros2-depth IP  Publish 20 experimental reconstructed ROS 2 frames");
             println!("  -h, --help    Show this help");
             return 0;
         }
         _ => {
-            eprintln!("Usage: {program} [--write | --diagnose | --smoke-pair IP OUTPUT_PREFIX]");
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             return 2;
         }
     };

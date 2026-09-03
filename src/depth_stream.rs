@@ -5,16 +5,26 @@ use std::net::SocketAddr;
 use std::thread;
 use std::time::Duration;
 
-// The network SDK maps STREAM_FORMAT_Z16 to firmware selector 2. Selector 1
-// requests the binocular infrared pair, whose adjacent Y8 bytes can look like
-// plausible but false little-endian depths.
-const SET_DEPTH_FORMAT: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=2";
+// Hardware capture established that selector 1 produces STREAM_FORMAT_PAIR:
+// two contiguous 640x400 Y8 infrared planes. Selector 2 is accepted by the
+// firmware but does not produce media in isolated tests. RevoScan itself asks
+// the camera API for PAIR and derives depth later in its host-side pipeline.
+const SET_PAIR_FORMAT: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=1";
 const SET_DEPTH_PROFILE: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_display_reso=1&&set_display_width=640&&set_display_height=400&&set_display_type=2";
 const GET_DEPTH_RESOLUTION: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&get_depth_reso";
 const GET_DEPTH_SCALE: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&algo_get_cmd_buf=2328";
 const DEPTH_MEDIA: &str = "/cgi-bin/zx_media.cgi?camera_id=21";
 const CLOSE_STREAMS: &str = "/cgi-bin/zx_cmd.cgi?close_stream_all";
+const LED_MASTER_ON: &str =
+    "/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb00%201%20%3E%20/dev/rk_preisp";
+const LED_IR_ON: &str =
+    "/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb01%201%20%3E%20/dev/rk_preisp";
+const LED_IR_OFF: &str =
+    "/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb01%200%20%3E%20/dev/rk_preisp";
+const LED_MASTER_OFF: &str =
+    "/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb00%200%20%3E%20/dev/rk_preisp";
 const PROFILE_SETTLE_TIME: Duration = Duration::from_millis(300);
+const EMITTER_SETTLE_TIME: Duration = Duration::from_millis(300);
 const SELECTOR_ATTEMPTS: usize = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -119,18 +129,24 @@ pub enum DepthStreamError {
     RejectedConfiguration,
     InvalidResolution(DepthResolutionError),
     InvalidScale(DepthScaleError),
+    DepthOutputUnavailable,
+    RejectedEmitter(&'static str),
 }
 
 impl Display for DepthStreamError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Http { stage, source } => write!(formatter, "{stage}: {source}"),
-            Self::RejectedProfile => formatter.write_str("scanner rejected the Z16 depth profile"),
+            Self::RejectedProfile => formatter.write_str("scanner rejected the PAIR profile"),
             Self::RejectedConfiguration => {
                 formatter.write_str("scanner rejected the depth output configuration")
             }
             Self::InvalidResolution(error) => Display::fmt(error, formatter),
             Self::InvalidScale(error) => Display::fmt(error, formatter),
+            Self::DepthOutputUnavailable => formatter.write_str(
+                "Z16 acquisition is not yet implemented; refusing to interpret PAIR images as depth",
+            ),
+            Self::RejectedEmitter(stage) => write!(formatter, "scanner rejected {stage}"),
         }
     }
 }
@@ -142,8 +158,19 @@ impl Error for DepthStreamError {
             Self::RejectedProfile | Self::RejectedConfiguration => None,
             Self::InvalidResolution(error) => Some(error),
             Self::InvalidScale(error) => Some(error),
+            Self::DepthOutputUnavailable => None,
+            Self::RejectedEmitter(_) => None,
         }
     }
+}
+
+pub fn capture_depth_prefix(
+    _address: SocketAddr,
+    _limits: StreamLimits,
+    _prefix_bytes: usize,
+    _receive: impl FnMut(&[u8]),
+) -> Result<usize, DepthStreamError> {
+    Err(DepthStreamError::DepthOutputUnavailable)
 }
 
 pub fn get_current_depth_resolution(
@@ -172,7 +199,7 @@ pub fn get_depth_scale_mm(
     parse_depth_scale_mm(&response).map_err(DepthStreamError::InvalidScale)
 }
 
-pub fn capture_depth_prefix(
+pub fn capture_pair_prefix(
     address: SocketAddr,
     limits: StreamLimits,
     prefix_bytes: usize,
@@ -180,7 +207,7 @@ pub fn capture_depth_prefix(
 ) -> Result<usize, DepthStreamError> {
     let profile = get_bounded_body(address, SET_DEPTH_PROFILE, limits).map_err(|source| {
         DepthStreamError::Http {
-            stage: "configure Z16 depth profile",
+            stage: "configure PAIR profile",
             source,
         }
     })?;
@@ -193,7 +220,7 @@ pub fn capture_depth_prefix(
     // reboot or reconnect the scanner when changing selectors.
     thread::sleep(PROFILE_SETTLE_TIME);
     for attempt in 0..SELECTOR_ATTEMPTS {
-        match get_bounded_body(address, SET_DEPTH_FORMAT, limits) {
+        match get_bounded_body(address, SET_PAIR_FORMAT, limits) {
             Ok(configuration) if trim_ascii_whitespace(&configuration) == br#"{"result":0}"# => {
                 break;
             }
@@ -213,19 +240,44 @@ pub fn capture_depth_prefix(
         }
     }
 
+    set_emitter(address, limits, LED_MASTER_ON, "enable LED master")?;
+    if let Err(error) = set_emitter(address, limits, LED_IR_ON, "enable infrared projector") {
+        let _ = set_emitter(address, limits, LED_IR_OFF, "disable infrared projector");
+        let _ = set_emitter(address, limits, LED_MASTER_OFF, "disable LED master");
+        return Err(error);
+    }
+    thread::sleep(EMITTER_SETTLE_TIME);
+
     let capture = get_chunked_prefix(address, DEPTH_MEDIA, limits, prefix_bytes, receive);
     let close = get_bounded_body(address, CLOSE_STREAMS, limits);
-    match (capture, close) {
-        (Ok(received), Ok(_)) => Ok(received),
-        (Err(source), _) => Err(DepthStreamError::Http {
-            stage: "capture depth media",
+    let infrared_off = set_emitter(address, limits, LED_IR_OFF, "disable infrared projector");
+    let master_off = set_emitter(address, limits, LED_MASTER_OFF, "disable LED master");
+    match (capture, close, infrared_off, master_off) {
+        (Ok(received), Ok(_), Ok(()), Ok(())) => Ok(received),
+        (Err(source), _, _, _) => Err(DepthStreamError::Http {
+            stage: "capture PAIR media",
             source,
         }),
-        (Ok(_), Err(source)) => Err(DepthStreamError::Http {
+        (Ok(_), Err(source), _, _) => Err(DepthStreamError::Http {
             stage: "close streams",
             source,
         }),
+        (Ok(_), Ok(_), Err(error), _) | (Ok(_), Ok(_), Ok(()), Err(error)) => Err(error),
     }
+}
+
+fn set_emitter(
+    address: SocketAddr,
+    limits: StreamLimits,
+    path: &'static str,
+    stage: &'static str,
+) -> Result<(), DepthStreamError> {
+    let response = get_bounded_body(address, path, limits)
+        .map_err(|source| DepthStreamError::Http { stage, source })?;
+    if !trim_ascii_whitespace(&response).ends_with(b"[ok]") {
+        return Err(DepthStreamError::RejectedEmitter(stage));
+    }
+    Ok(())
 }
 
 fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {

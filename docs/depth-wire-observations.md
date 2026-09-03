@@ -45,24 +45,44 @@ available, and sizes its destination as width times height times format bits,
 rounded to bytes. The project uses the independently published `quicklz` Rust
 crate rather than copying or translating that routine.
 
-The official binary configures network depth profiles with explicit display
-width, height, and stream-format values. Revopoint's public SDK headers identify
-format value 2 as Z16: one unsigned 16-bit depth value per pixel. The client now
-selects 640x400 Z16 explicitly before opening media rather than relying on the
-scanner's previous state.
+The official binary configures network profiles with explicit display width,
+height, and stream-format values. Revopoint's public SDK headers identify format
+value 2 as Z16 and format value 4 as `PAIR`, containing left and right Y8 images.
 
-The Windows binary's network start path changes that selection in place; it
-does not power-cycle the scanner. For Z16 it sends the 640x400 profile with
-display type 2, waits 300 ms, then sends depth-output selector 2. The selector
-request is attempted at most three times before startup fails. Only after the
-selector succeeds does it open the depth media stream. The Rust acquisition
-path follows that same ordering, delay, and retry bound.
+The Windows SDK's network start path changes that selection in place; it does
+not power-cycle the scanner. It sends the profile, waits 300 ms, and retries the
+output-selector request at most three times before startup fails.
 
-The scanner's read-only `get_depth_reso` endpoint then reports
-`curr-resolution` as `640x400x2`. The client parses that as width 640, height
-400, two bytes per pixel, a 1,280-byte stride, and a 512,000-byte frame. Every
-hardware-decoded frame must match that layout exactly before becoming an owned
-little-endian Z16 plane.
+Inspection of RevoScan's own `start depth stream` call site establishes the
+important missing distinction: the application passes stream format `4`
+(`PAIR`), width 640, and height 480 to its camera-management wrapper. That
+wrapper obtains the camera's available stream descriptions and calls the camera
+interface's `startStream` virtual method with the selected PAIR description. In
+other words, RevoScan itself does not ask this network camera for Z16 at the
+acquisition boundary; its later processing pipeline derives depth from the
+binocular images.
+
+Selector 2 is accepted but produced no bytes from `camera_id=21` in isolated
+hardware probes. That is no longer assumed to indicate a missing selector
+prerequisite: it may simply be an unused firmware path for this model.
+
+Selector 1 reliably produces media without a power cycle. Current binary
+inspection maps the SDK's `PAIR` format to selector 1, and the public SDK source
+defines its memory layout as one contiguous left Y8 plane followed by one
+contiguous right Y8 plane. The Rust acquisition path now exposes only that
+verified PAIR result.
+
+A usable PAIR image also requires both pre-ISP illumination controls: register
+`0xb00` enables the LED master and `0xb01` enables the infrared projector. With
+the selector configured but those controls off, frames were nearly black. With
+both enabled and a 300 ms settling delay, the same bounded capture produced two
+bright, recognizable views of the physical target. The client disables the
+projector and master after every attempted capture; a fixture-server integration
+test also verifies cleanup when projector enablement is rejected.
+
+The scanner's read-only `get_depth_reso` endpoint reports `curr-resolution` as
+`640x400x2`. That is also the total byte count for two Y8 planes: 512,000 bytes.
+It is not sufficient evidence of a little-endian Z16 plane.
 
 The official SDK describes its depth scale as the physical millimeters
 represented by one raw depth unit. Binary inspection established that the
@@ -93,12 +113,10 @@ exactly 1,024,000 bytes; one representative run had compressed sizes 233,528,
 234,171, 238,701, and 238,274 bytes. The fifth frame was intentionally cut off
 by the acquisition limit and was not counted.
 
-After explicit Z16 selection, four further hardware frames each decompressed to
-exactly 512,000 bytes. One bounded run found 255,997 nonzero samples per
-256,000-pixel frame and mean nonzero depths from 190.47 to 190.76 mm using the
-device-reported scale. Minimum and maximum raw values are retained as diagnostic
-receipts but are not yet treated as validated range limits.
-
-A subsequent bounded smoke downloaded the 1280x800 calibration record and
-reported the expected scaled 640x400 intrinsics alongside four valid Z16 plane
-receipts.
+Selector 1 produced 512,000-byte decoded frames. Interpreting each adjacent byte
+pair as a `u16` yielded values around 190 mm and a non-empty RViz cloud, but that
+interpretation was wrong. The bytes are contiguous left/right Y8 planes. The
+apparently geometric V-shaped cloud was an artifact of combining unrelated
+neighboring intensity pixels. These observations invalidate the earlier live
+Z16, metric-depth, and RViz acceptance claims; the repository now fails closed
+instead of exposing them.

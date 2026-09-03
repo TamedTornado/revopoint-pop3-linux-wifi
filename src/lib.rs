@@ -11,6 +11,7 @@ pub mod depth_decode;
 pub mod depth_stream;
 pub mod frame_envelope;
 pub mod http_stream;
+pub mod pair_decode;
 #[cfg(feature = "ros2")]
 pub mod ros2_adapter;
 pub mod ros_camera;
@@ -350,18 +351,7 @@ fn run(write: bool, diagnose: bool) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-struct CapturedDepthSample {
-    received: usize,
-    resolution: depth_stream::DepthResolution,
-    millimeters_per_unit: f32,
-    depth_intrinsics: calibration::DepthIntrinsics,
-    scaled_intrinsics: calibration::ScaledDepthIntrinsics,
-    frames: Vec<(u32, depth_decode::DepthPlane)>,
-    wire_prefix: Vec<u8>,
-    decoded_prefix: Vec<u8>,
-}
-
-fn capture_depth_sample(ip: &str) -> Result<CapturedDepthSample, Box<dyn Error>> {
+fn smoke_pair(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     const PREFIX_BYTES: usize = 1024 * 1024;
     let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
     let limits = http_stream::StreamLimits {
@@ -371,166 +361,50 @@ fn capture_depth_sample(ip: &str) -> Result<CapturedDepthSample, Box<dyn Error>>
         max_header_bytes: 16 * 1024,
         max_body_bytes: 2 * 1024 * 1024,
     };
-    let mut prefix = Vec::with_capacity(16);
     let mut parser = frame_envelope::FrameEnvelopeParser::new(2 * 1024 * 1024, 4);
-    let mut decoded_frames = Vec::new();
-    let mut decoded_prefix = Vec::new();
+    let mut first_pair = None;
     let mut frame_error: Option<Box<dyn Error>> = None;
-    let received = depth_stream::capture_depth_prefix(address, limits, PREFIX_BYTES, |chunk| {
-        let remaining = 16_usize.saturating_sub(prefix.len());
-        prefix.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
-        if frame_error.is_none() {
-            match parser.push(chunk) {
-                Ok(frames) => {
-                    for frame in frames {
-                        match depth_decode::decode_quicklz(&frame, 2 * 1024 * 1024) {
-                            Ok(decoded) => {
-                                if decoded_prefix.is_empty() {
-                                    decoded_prefix.extend_from_slice(
-                                        &decoded.bytes[..decoded.bytes.len().min(64)],
-                                    );
-                                }
-                                decoded_frames.push(decoded)
-                            }
-                            Err(error) => {
-                                frame_error = Some(Box::new(error));
-                                break;
-                            }
-                        }
+    let received = depth_stream::capture_pair_prefix(address, limits, PREFIX_BYTES, |chunk| {
+        if first_pair.is_some() || frame_error.is_some() {
+            return;
+        }
+        match parser.push(chunk) {
+            Ok(frames) => {
+                if let Some(frame) = frames.into_iter().next() {
+                    match depth_decode::decode_quicklz(&frame, 2 * 1024 * 1024)
+                        .map_err(|error| Box::new(error) as Box<dyn Error>)
+                        .and_then(|decoded| {
+                            pair_decode::decode_y8_pair(decoded.bytes, 640, 400)
+                                .map_err(|error| Box::new(error) as Box<dyn Error>)
+                        }) {
+                        Ok(pair) => first_pair = Some(pair),
+                        Err(error) => frame_error = Some(error),
                     }
                 }
-                Err(error) => frame_error = Some(Box::new(error)),
             }
+            Err(error) => frame_error = Some(Box::new(error)),
         }
     })?;
     if let Some(error) = frame_error {
         return Err(error);
     }
-    let resolution = depth_stream::get_current_depth_resolution(address, limits)?;
-    if resolution.bytes_per_pixel != 2 {
-        return Err(failure(
-            "configured depth profile did not produce two-byte Z16 elements",
-        ));
-    }
-    let millimeters_per_unit = depth_stream::get_depth_scale_mm(address, limits)?;
-    let depth_intrinsics = calibration::get_depth_intrinsics(address, limits)?;
-    let scaled_intrinsics = depth_intrinsics.for_resolution(resolution.width, resolution.height)?;
-    let mut frames = Vec::with_capacity(decoded_frames.len());
-    for decoded in decoded_frames {
-        let compressed_len = decoded.compressed_len;
-        let plane =
-            decoded.into_z16_plane(resolution.width, resolution.height, millimeters_per_unit)?;
-        frames.push((compressed_len, plane));
-    }
-    Ok(CapturedDepthSample {
-        received,
-        resolution,
-        millimeters_per_unit,
-        depth_intrinsics,
-        scaled_intrinsics,
-        frames,
-        wire_prefix: prefix,
-        decoded_prefix,
-    })
-}
-
-fn smoke_depth(ip: &str) -> Result<(), Box<dyn Error>> {
-    let sample = capture_depth_sample(ip)?;
-    let frame_receipts = sample
-        .frames
-        .iter()
-        .map(|(compressed_len, plane)| {
-            let statistics = plane.statistics();
-            (
-                compressed_len,
-                plane.bytes.len(),
-                statistics.nonzero_samples,
-                statistics.minimum_nonzero_raw,
-                statistics.maximum_raw,
-                statistics.mean_nonzero_mm,
-            )
-        })
-        .collect::<Vec<_>>();
-    let prefix = sample
-        .wire_prefix
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let decoded_prefix = sample
-        .decoded_prefix
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let pair =
+        first_pair.ok_or_else(|| failure("bounded capture contained no complete PAIR frame"))?;
+    let left_path = format!("{output_prefix}-left.pgm");
+    let right_path = format!("{output_prefix}-right.pgm");
+    std::fs::write(
+        &left_path,
+        pair_decode::encode_y8_pgm(pair.width, pair.height, &pair.left)?,
+    )?;
+    std::fs::write(
+        &right_path,
+        pair_decode::encode_y8_pgm(pair.width, pair.height, &pair.right)?,
+    )?;
     println!(
-        "Depth stream smoke passed: bytes={}, resolution={}x{}x{}, stride={}, millimeters_per_unit={}, calibration={}x{}, intrinsics=(fx={},fy={},cx={},cy={}), complete_frames={}, frame_receipts=(compressed_bytes,raw_bytes,nonzero,min_raw,max_raw,mean_nonzero_mm){frame_receipts:?}, wire_prefix={prefix}, decoded_prefix={decoded_prefix}",
-        sample.received,
-        sample.resolution.width,
-        sample.resolution.height,
-        sample.resolution.bytes_per_pixel,
-        sample
-            .resolution
-            .stride_bytes()
-            .expect("validated resolution"),
-        sample.millimeters_per_unit,
-        sample.depth_intrinsics.calibration_width,
-        sample.depth_intrinsics.calibration_height,
-        sample.scaled_intrinsics.fx,
-        sample.scaled_intrinsics.fy,
-        sample.scaled_intrinsics.cx,
-        sample.scaled_intrinsics.cy,
-        frame_receipts.len()
+        "PAIR stream smoke passed: bytes={received}, resolution={}x{}, left={left_path}, right={right_path}",
+        pair.width, pair.height
     );
     Ok(())
-}
-
-#[cfg(feature = "ros2")]
-fn ros2_depth(ip: &str) -> Result<(), Box<dyn Error>> {
-    use rclrs::CreateBasicExecutor;
-
-    const BATCHES: usize = 20;
-    let context = rclrs::Context::default();
-    let executor = context.create_basic_executor();
-    let node = executor.create_node("revopoint_pop3_depth")?;
-    let publisher = ros2_adapter::Ros2CameraPublisher::new(&node)?;
-    println!("Publishing {BATCHES} bounded live batches on depth/image_rect and depth/camera_info");
-    thread::sleep(Duration::from_secs(1));
-
-    let mut published = 0_usize;
-    for _ in 0..BATCHES {
-        let sample = capture_depth_sample(ip)?;
-        for (_, plane) in sample.frames {
-            let stamp = current_ros_time()?;
-            let frame = ros_camera::map_depth_camera(
-                plane,
-                sample.scaled_intrinsics,
-                stamp,
-                "pop3_depth_optical_frame",
-            )?;
-            publisher.publish(frame)?;
-            published += 1;
-        }
-    }
-    println!("ROS 2 depth publication completed: frames={published}");
-    Ok(())
-}
-
-#[cfg(feature = "ros2")]
-fn current_ros_time() -> Result<ros_camera::RosTime, Box<dyn Error>> {
-    let elapsed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
-    Ok(ros_camera::RosTime {
-        sec: i32::try_from(elapsed.as_secs())
-            .map_err(|_| failure("current UNIX timestamp exceeds ROS Time.sec"))?,
-        nanosec: elapsed.subsec_nanos(),
-    })
-}
-
-#[cfg(not(feature = "ros2"))]
-fn ros2_depth(_ip: &str) -> Result<(), Box<dyn Error>> {
-    Err(failure(
-        "ROS 2 support is disabled; source Jazzy and rebuild with --features ros2",
-    ))
 }
 
 pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
@@ -543,8 +417,8 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
         [] => (false, false),
         [argument] if argument == "--write" => (true, false),
         [argument] if argument == "--diagnose" => (false, true),
-        [argument, ip] if argument == "--smoke-depth" => {
-            return match smoke_depth(ip) {
+        [argument, ip, output_prefix] if argument == "--smoke-pair" => {
+            return match smoke_pair(ip, output_prefix) {
                 Ok(()) => 0,
                 Err(error) => {
                     eprintln!("Error: {error}");
@@ -552,32 +426,18 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 }
             }
         }
-        [argument, ip] if argument == "--ros2-depth" => {
-            return match ros2_depth(ip) {
-                Ok(()) => 0,
-                Err(error) => {
-                    eprintln!("Error: {error}");
-                    1
-                }
-            };
-        }
         [argument] if argument == "--help" || argument == "-h" => {
-            println!(
-                "Usage: {program} [--write | --diagnose | --smoke-depth IP | --ros2-depth IP]"
-            );
+            println!("Usage: {program} [--write | --diagnose | --smoke-pair IP OUTPUT_PREFIX]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
             println!("  --diagnose    Report scanner-side Wi-Fi diagnostics over USB");
-            println!("  --smoke-depth IP  Capture a bounded depth prefix over Wi-Fi");
-            println!("  --ros2-depth IP   Publish 20 live depth batches through ROS 2 Jazzy");
+            println!("  --smoke-pair IP OUTPUT_PREFIX  Save left/right infrared PGM images");
             println!("  -h, --help    Show this help");
             return 0;
         }
         _ => {
-            eprintln!(
-                "Usage: {program} [--write | --diagnose | --smoke-depth IP | --ros2-depth IP]"
-            );
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-pair IP OUTPUT_PREFIX]");
             return 2;
         }
     };

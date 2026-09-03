@@ -64,15 +64,20 @@ every header split, concatenated frames, corruption, truncation, and size
 limits before trusting hardware frame counts.
 
 In progress: the independently observed and binary-corroborated outer envelope
-is implemented and mutation-clean. A 1 MiB hardware run recovered four complete
-compressed frames. Inner dimensions and continuity fields are not yet
-established, so this phase and issue remain open.
+is implemented and mutation-clean. Hardware runs recovered complete compressed
+PAIR frames. Inner dimensions and continuity fields are not yet established.
 
 ### 4. Decode the depth plane ([#4](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/4))
 
 Decode compressed payloads in clean-room Rust using project-owned fixtures.
 Return an explicit width, height, stride, encoding, and pixel buffer. Reject
 malformed data without panics or unbounded allocation.
+
+Corrected status: QuickLZ decoding works, but the live selector is `PAIR`, not
+Z16. Its two contiguous Y8 planes are now decoded explicitly. RevoScan's own
+`start depth stream` call site passes format 4 (`PAIR`) into the camera API,
+confirming that metric depth is derived later on the host. Issue #4 must remain
+open until that stereo reconstruction boundary is independently implemented.
 
 ### 5. Establish metric meaning and calibration ([#5](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/5))
 
@@ -81,11 +86,10 @@ convention, and rectification state. Validate scale and planar error against
 measured physical targets. The output of this phase is a calibrated depth
 frame, not merely decoded integers.
 
-In progress: the device depth-unit divisor and read-only depth intrinsics are
-parsed, validated, scaled to the selected 640x400 stream using the public SDK's
-documented projection transform, exercised against hardware, and
-mutation-clean. Distortion/rectification semantics, optical-frame publication,
-and physical-target qualification remain open.
+The device depth-unit divisor and read-only depth intrinsics can be parsed and
+scaled, but they cannot be applied directly to PAIR intensities. All live metric
+claims are withdrawn pending independently implemented rectification, disparity,
+and depth reconstruction from the verified binocular input.
 
 ### 5a. Mutation-test deterministic contracts ([#9](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/9))
 
@@ -100,14 +104,9 @@ Add a feature-gated Rust ROS 2 Jazzy adapter publishing synchronized
 `sensor_msgs/Image` and `sensor_msgs/CameraInfo` messages with sensor-data QoS.
 Test exact message fields using a real ROS subscriber boundary.
 
-In progress: a ROS-independent mapping contract converts device-scaled Z16 to
-standard `32FC1` meters and constructs synchronized rectified camera metadata.
-The mapping is mutation-clean. A feature-gated rclrs 0.7 adapter now creates
-real runtime-typed Jazzy `sensor_msgs/Image` and `CameraInfo` messages under
-sensor-data QoS; the installed type-support integration tests pass. Live
-publishing now captures 20 bounded batches and a stock Jazzy subscriber received
-the resulting runtime-typed topics. Device sequence/timestamp recovery remains
-open; the provisional publisher uses a shared host timestamp per message pair.
+The offline Z16-to-ROS mapping contract remains tested, but live publication is
+disabled. The prior live run consumed PAIR bytes mislabeled as Z16 and is not
+valid depth evidence.
 
 ### 7. Qualify the stock Linux application path ([#7](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/7))
 
@@ -116,16 +115,9 @@ image and derived cloud in RViz2, and record automated graph evidence plus a
 real-hardware acceptance receipt. Exercise turntable motion, scale,
 orientation, shutdown, and restart.
 
-In progress: stock Jazzy `PointCloudXyzNode` synchronized the live Image and
-CameraInfo topics and emitted a non-empty organized 640x400 `PointCloud2`.
-RViz2 visual acceptance, turntable motion, planar-target measurement, and
-restart qualification remain open.
-
-First visual receipt: RViz2 loaded the repository profile and rendered the live
-organized cloud against its metric grid. The initial screenshot is an oblique,
-nearly edge-on view through the scanner frustum, so it proves non-empty spatial
-geometry rather than recognizable-object shape or metric accuracy. Those
-stronger claims still require a known target and deliberate viewing angles.
+Corrected status: the ROS graph and RViz plumbing worked, but its live input was
+not depth. The V-shaped cloud was a useful falsification signal, not an
+acceptance receipt. This phase returns to blocked-on-depth status.
 
 ### 8. Continue into turntable RGB-D capture ([#8](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/8))
 

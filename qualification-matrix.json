@@ -6,10 +6,10 @@
     "offline_integration_pass": true,
     "native_dependency_quarantine_pass": true,
     "mutation_tests_pass": false,
-    "hardware_depth_bytes_pass": true,
-    "hardware_depth_frames_pass": true,
-    "hardware_depth_z16_pass": true,
-    "ros_depth_camera_pass": true,
+    "hardware_pair_bytes_pass": true,
+    "hardware_pair_frames_pass": true,
+    "hardware_depth_z16_pass": false,
+    "ros_depth_camera_pass": false,
     "rviz_live_acceptance_pass": false
   },
   "cells": [
@@ -19,7 +19,7 @@
       "environment": "Ubuntu 24.04 or compatible Linux",
       "command": "cargo test --lib",
       "status": "PASS",
-      "claim": "Pure provisioning logic is deterministic; depth contracts are added red-first"
+      "claim": "Pure provisioning and PAIR-layout logic is deterministic; depth contracts are added red-first"
     },
     {
       "id": "offline-integration",
@@ -57,49 +57,49 @@
       "id": "hardware-byte-stream",
       "tier": "hardware",
       "environment": "POP 3 Plus on reachable LAN",
-      "command": "cargo run --release -- --smoke-depth SCANNER_IP",
+      "command": "cargo run --release -- --smoke-pair SCANNER_IP OUTPUT_PREFIX",
       "status": "PASS",
-      "claim": "Five consecutive real-hardware runs each configured depth output, captured exactly 1048576 live bytes, closed the stream, and restarted successfully"
+      "claim": "Real-hardware runs configured selector 1 PAIR output, enabled and settled the infrared projector, captured exactly 1048576 live bytes, disabled illumination, closed the stream, and restarted without power cycling"
     },
     {
       "id": "hardware-frames",
       "tier": "hardware",
       "environment": "POP 3 Plus on reachable LAN",
-      "command": "cargo run --release -- --smoke-depth SCANNER_IP",
+      "command": "cargo run --release -- --smoke-pair SCANNER_IP OUTPUT_PREFIX",
       "status": "PASS",
-      "claim": "The Rust client recovered and QuickLZ-decompressed four complete bounded envelopes; each became an owned little-endian Z16 plane exactly matching the explicitly selected 640x400 profile and 1280-byte stride"
+      "claim": "The Rust client recovered and QuickLZ-decompressed complete bounded envelopes; each 512000-byte frame splits into contiguous 640x400 left and right Y8 planes, and the emitted PGM images visibly contain the physical target"
     },
     {
       "id": "metric-depth",
       "tier": "hardware",
       "environment": "POP 3 Plus and measured physical targets",
-      "command": "cargo run --release -- --smoke-depth SCANNER_IP",
-      "status": "PARTIAL",
-      "claim": "The device reports 0.1 mm per Z16 unit; its 1280x800 depth projection record parses and scales to the selected 640x400 stream as the public SDK specifies; physical-target, distortion, rectification, and invalid-value qualification remain open"
+      "command": "not available",
+      "status": "BLOCKED",
+      "claim": "RevoScan itself requests format 4 PAIR at its camera start boundary; independently implemented host-side stereo reconstruction is now the missing depth stage"
     },
     {
       "id": "ros-contract",
       "tier": "ros-integration",
       "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
-      "command": ". /opt/ros/jazzy/setup.sh && cargo run --release --features ros2 -- --ros2-depth SCANNER_IP",
-      "status": "PASS",
-      "claim": "Stock Jazzy subscribers received live 640x400 sensor_msgs/Image 32FC1-meter and rectified CameraInfo topics with sensor-data QoS and per-pair matching headers"
+      "command": "cargo test --features ros2 --test ros2_dynamic_messages",
+      "status": "PARTIAL",
+      "claim": "Offline runtime message construction passes; live publication is disabled because genuine Z16 is not acquired"
     },
     {
       "id": "depth-image-proc",
       "tier": "ros-integration",
       "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
       "command": "ros2 run depth_image_proc point_cloud_xyz_node --ros-args -r image_rect:=/depth/image_rect -r camera_info:=/depth/camera_info",
-      "status": "PASS",
-      "claim": "Stock depth_image_proc synchronized the live driver topics and emitted a non-empty organized 640x400 PointCloud2"
+      "status": "BLOCKED",
+      "claim": "The previous non-empty PointCloud2 was generated from PAIR intensities mislabeled as Z16 and is invalid; retry after genuine depth acquisition"
     },
     {
       "id": "rviz-hardware",
       "tier": "manual-hardware",
       "environment": "POP 3 Plus, turntable, ROS 2 Jazzy, RViz2",
       "command": "rviz2 -d config/pop3-depth.rviz",
-      "status": "PARTIAL",
-      "claim": "RViz2 rendered the real live organized cloud against a metric grid; recognizable-object shape, turntable motion, orientation, and measured scale/planarity remain unqualified"
+      "status": "BLOCKED",
+      "claim": "The previous V-shaped cloud was a false-depth artifact; no live metric visualization claim remains"
     }
   ]
 }

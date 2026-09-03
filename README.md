@@ -2,7 +2,7 @@
 
 A Linux-native Rust project for interoperating with a Revopoint POP 3 scanner.
 It currently provisions Wi-Fi client credentials over USB and performs bounded
-depth-stream acquisition over the LAN. It avoids installing or running Revo
+binocular-infrared acquisition over the LAN. It avoids installing or running Revo
 Scan, Windows, Wine, or a virtual machine.
 
 This project is an independent interoperability implementation. It contains no
@@ -30,23 +30,21 @@ The read path has been tested against real hardware. The write path:
 
 It does **not** change firmware or send an upgrade command.
 
-The network acquisition path can configure the scanner's depth output, capture
-an exact byte count from its chunked HTTP media stream, recover bounded frame
-envelopes, decompress their QuickLZ payloads in Rust, and validate owned
-640x400 little-endian Z16 planes. The device reports a depth unit of 0.1 mm.
-The client also downloads and validates the scanner's depth projection matrix,
-then scales its focal lengths and principal point to the selected stream size
-using the same resolution transform documented by Revopoint's public SDK.
-A feature-gated live ROS 2 publisher is available for the first standard
-application path.
+The network acquisition path can configure the scanner's `PAIR` output,
+capture an exact byte count from its chunked HTTP media stream, recover bounded
+frame envelopes, decompress their QuickLZ payloads in Rust, and split each
+640x400 frame into contiguous left and right Y8 infrared images.
 
-The in-progress optional ROS 2 adapter maps each Z16 plane to standard
-`sensor_msgs/Image` `32FC1` meters so the scanner's 0.1 mm units are not
-silently mislabeled as the `16UC1` millimeter convention. It produces matching
-rectified `sensor_msgs/CameraInfo` metadata and uses sensor-data QoS. The exact
-runtime message layouts are tested through Jazzy's installed type-support
-libraries. The live CLI publishes 20 bounded acquisition batches so a normal
-exit is deterministic and always closes each scanner stream.
+Metric depth is **not yet acquired**. Hardware tests disproved an earlier
+interpretation of selector 1 as Z16: those bytes are the two Y8 images described
+by the public SDK's `PAIR` layout. Treating adjacent bytes as little-endian
+depth created a plausible-looking but false point cloud. The CLI therefore no
+longer exposes the earlier depth/ROS commands, and the library's depth-capture
+entry point fails closed until host-side reconstruction is implemented.
+Binary inspection now confirms that RevoScan itself requests `PAIR` from the
+camera and derives depth later in its host-side processing pipeline. The next
+implementation boundary is therefore stereo reconstruction, not another
+firmware-selector experiment.
 
 ## Build
 
@@ -103,24 +101,27 @@ After a successful write, disconnect the USB data cable and power-cycle the
 scanner from a power adapter or power bank. When powered through a computer's USB
 data connection, the scanner normally remains in USB mode.
 
-## Smoke-test depth acquisition
+## Smoke-test binocular infrared acquisition
 
 With the scanner powered independently and connected to the same LAN, provide
 its IPv4 address:
 
 ```sh
-cargo run --release -- --smoke-depth 192.168.8.245
+cargo run --release -- --smoke-pair 192.168.8.245 /tmp/pop3
 ```
 
-The command captures exactly 1 MiB into a bounded reader, reports complete frame
-envelopes and their compressed-to-raw sizes, retains short wire and decoded
-prefixes for diagnostics, closes the scanner stream, and exits. It is intended
-as a hardware diagnostic rather than a file format or visualization tool.
+The command captures exactly 1 MiB into a bounded reader, decompresses the
+first complete frame, saves `/tmp/pop3-left.pgm` and
+`/tmp/pop3-right.pgm`, closes the scanner stream, and exits. Open either PGM in
+a normal Linux image viewer to inspect the acquisition result. The command
+enables the scanner's LED master and infrared projector immediately before
+capture, waits 300 ms for illumination to settle, and turns both controls off
+again on success or failure.
 
 Example output:
 
 ```text
-Depth stream smoke passed: bytes=1048576, resolution=640x400x2, stride=1280, millimeters_per_unit=0.1, calibration=1280x800, intrinsics=(fx=873.7233,fy=873.7233,cx=128.598,cy=201.2753), complete_frames=4, frame_receipts=[...]
+PAIR stream smoke passed: bytes=1048576, resolution=640x400, left=/tmp/pop3-left.pgm, right=/tmp/pop3-right.pgm
 ```
 
 Offline network-boundary tests use loopback fixture servers and require no
@@ -130,44 +131,9 @@ scanner:
 cargo test --test http_stream --test depth_capture
 ```
 
-The optional ROS adapter requires ROS 2 Jazzy to be sourced:
-
-```sh
-. /opt/ros/jazzy/setup.sh
-cargo test --features ros2 --test ros2_dynamic_messages
-```
-
-Publish live scanner frames on `depth/image_rect` and `depth/camera_info`:
-
-```sh
-. /opt/ros/jazzy/setup.sh
-cargo run --release --features ros2 -- --ros2-depth 192.168.8.245
-```
-
-The publisher converts the scanner's 0.1 mm Z16 units to `32FC1` meters and
-assigns identical provisional host-publication timestamps and optical frame IDs to each
-Image/CameraInfo pair. A local Jazzy qualification run delivered 80 live frames
-to stock subscribers; stock `depth_image_proc::PointCloudXyzNode` produced a
-non-empty organized 640x400 `PointCloud2`.
-
-To reproduce the stock visualization path, leave the publisher running and use
-two more sourced terminals:
-
-```sh
-# Terminal 2: derive an organized point cloud with the stock ROS component
-. /opt/ros/jazzy/setup.sh
-ros2 run depth_image_proc point_cloud_xyz_node --ros-args \
-  -r image_rect:=/depth/image_rect \
-  -r camera_info:=/depth/camera_info
-
-# Terminal 3: open the supplied depth-image and point-cloud view
-. /opt/ros/jazzy/setup.sh
-rviz2 -d config/pop3-depth.rviz
-```
-
-The RViz profile fixes the view to `pop3_depth_optical_frame`, subscribes to
-`/depth/image_rect` and `/points` with best-effort QoS, and includes a metric
-grid. Visual and physical-target acceptance remains a manual qualification.
+The repository retains separately tested Z16 decoding, calibration, ROS
+message-mapping, and RViz configuration work. None of it is currently wired to
+live acquisition because doing so would relabel PAIR pixels as metric depth.
 
 The independently established envelope is documented in
 [`docs/depth-wire-observations.md`](docs/depth-wire-observations.md).
@@ -181,6 +147,8 @@ The independently established envelope is documented in
   utility reattaches it before exiting.
 - Only `2207:110c` is accepted. Other Revopoint products may use a related
   protocol, but they are deliberately not targeted without hardware testing.
+- Live Z16/depth reconstruction is not yet implemented. Current LAN acquisition
+  yields the scanner's two Y8 infrared images only.
 
 ## How it works
 

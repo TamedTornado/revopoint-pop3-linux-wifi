@@ -1,4 +1,6 @@
-use revopoint_pop3_wifi::depth_stream::{capture_depth_prefix, DepthStreamError};
+use revopoint_pop3_wifi::depth_stream::{
+    capture_depth_prefix, capture_pair_prefix, DepthStreamError,
+};
 use revopoint_pop3_wifi::frame_envelope::FrameEnvelopeParser;
 use revopoint_pop3_wifi::http_stream::StreamLimits;
 use std::error::Error;
@@ -35,6 +37,20 @@ fn limits() -> StreamLimits {
     }
 }
 
+#[test]
+fn refuses_to_relabel_pair_bytes_as_depth() {
+    let error = capture_depth_prefix(
+        "127.0.0.1:1".parse().expect("socket address"),
+        limits(),
+        1,
+        |_| {},
+    )
+    .expect_err("depth acquisition must fail closed");
+
+    assert!(matches!(error, DepthStreamError::DepthOutputUnavailable));
+    assert!(error.to_string().contains("refusing to interpret PAIR"));
+}
+
 fn envelope(payload: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::from(0x1122_3344_u32.to_le_bytes());
     bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
@@ -59,11 +75,14 @@ fn configures_captures_a_prefix_and_closes_the_stream() {
         let (mut start, _) = listener.accept().expect("accept start request");
         assert_eq!(
             read_path(&mut start),
-            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=2"
+            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=1"
         );
         start
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 14\r\n\r\n{\"result\":0}\r\n")
             .expect("write start response");
+
+        expect_control(&listener, LED_MASTER_ON_PATH);
+        expect_control(&listener, LED_IR_ON_PATH);
 
         let (mut media, _) = listener.accept().expect("accept media request");
         assert_eq!(read_path(&mut media), "/cgi-bin/zx_media.cgi?camera_id=21");
@@ -79,12 +98,13 @@ fn configures_captures_a_prefix_and_closes_the_stream() {
         close
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
             .expect("write close response");
+        expect_control(&listener, LED_IR_OFF_PATH);
+        expect_control(&listener, LED_MASTER_OFF_PATH);
     });
 
     let mut body = Vec::new();
-    let received =
-        capture_depth_prefix(address, limits(), 5, |chunk| body.extend_from_slice(chunk))
-            .expect("capture depth prefix");
+    let received = capture_pair_prefix(address, limits(), 5, |chunk| body.extend_from_slice(chunk))
+        .expect("capture PAIR prefix");
 
     assert_eq!(received, 5);
     assert_eq!(body, b"12345");
@@ -108,11 +128,14 @@ fn closes_the_scanner_stream_after_a_capture_error() {
         let (mut start, _) = listener.accept().expect("accept start request");
         assert_eq!(
             read_path(&mut start),
-            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=2"
+            "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=1"
         );
         start
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
             .expect("write start response");
+
+        expect_control(&listener, LED_MASTER_ON_PATH);
+        expect_control(&listener, LED_IR_ON_PATH);
 
         let (mut media, _) = listener.accept().expect("accept media request");
         assert_eq!(read_path(&mut media), "/cgi-bin/zx_media.cgi?camera_id=21");
@@ -130,12 +153,14 @@ fn closes_the_scanner_stream_after_a_capture_error() {
                 b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nc\r\n{\"result\":0}\r\n0\r\n\r\n",
             )
             .expect("write close response");
+        expect_control(&listener, LED_IR_OFF_PATH);
+        expect_control(&listener, LED_MASTER_OFF_PATH);
     });
 
-    let error = capture_depth_prefix(address, limits(), 5, |_| {})
+    let error = capture_pair_prefix(address, limits(), 5, |_| {})
         .expect_err("media failure must be reported");
 
-    assert!(error.to_string().contains("capture depth media"));
+    assert!(error.to_string().contains("capture PAIR media"));
     assert!(error.to_string().contains("500"));
     assert!(
         error.source().is_some(),
@@ -168,6 +193,9 @@ fn carries_fragmented_http_bytes_into_complete_frame_envelopes() {
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
             .expect("write start response");
 
+        expect_control(&listener, LED_MASTER_ON_PATH);
+        expect_control(&listener, LED_IR_ON_PATH);
+
         let (mut media, _) = listener.accept().expect("accept media request");
         read_path(&mut media);
         write!(
@@ -185,11 +213,13 @@ fn carries_fragmented_http_bytes_into_complete_frame_envelopes() {
         close
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
             .expect("write close response");
+        expect_control(&listener, LED_IR_OFF_PATH);
+        expect_control(&listener, LED_MASTER_OFF_PATH);
     });
     let mut parser = FrameEnvelopeParser::new(1024, 4);
     let mut payloads = Vec::new();
 
-    capture_depth_prefix(address, limits(), capture_bytes, |chunk| {
+    capture_pair_prefix(address, limits(), capture_bytes, |chunk| {
         payloads.extend(
             parser
                 .push(chunk)
@@ -241,6 +271,9 @@ fn retries_a_rejected_depth_selector_without_power_cycling() {
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
             .expect("accept second selector request");
 
+        expect_control(&listener, LED_MASTER_ON_PATH);
+        expect_control(&listener, LED_IR_ON_PATH);
+
         let mut media = accept_before(&listener, deadline, "media request");
         read_path(&mut media);
         media
@@ -252,9 +285,11 @@ fn retries_a_rejected_depth_selector_without_power_cycling() {
         close
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
             .expect("write close response");
+        expect_control(&listener, LED_IR_OFF_PATH);
+        expect_control(&listener, LED_MASTER_OFF_PATH);
     });
 
-    let result = capture_depth_prefix(address, limits(), 1, |_| {});
+    let result = capture_pair_prefix(address, limits(), 1, |_| {});
     let server_result = server.join();
     assert!(
         server_result.is_ok(),
@@ -286,6 +321,44 @@ fn stops_after_three_selector_http_failures_and_preserves_the_cause() {
     let error = result.expect_err("three failed selector requests must fail");
     assert!(error.to_string().contains("configure depth output"));
     assert!(error.to_string().contains("500"));
+}
+
+#[test]
+fn rejected_infrared_enable_still_turns_both_emitter_controls_off() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let (mut profile, _) = listener.accept().expect("accept profile request");
+        read_path(&mut profile);
+        profile
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write profile response");
+
+        let (mut selector, _) = listener.accept().expect("accept selector request");
+        assert_eq!(read_path(&mut selector), SET_DEPTH_SELECTOR_PATH);
+        selector
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write selector response");
+
+        expect_control(&listener, LED_MASTER_ON_PATH);
+        let (mut infrared, _) = listener.accept().expect("accept infrared request");
+        assert_eq!(read_path(&mut infrared), LED_IR_ON_PATH);
+        infrared
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\n[failed]")
+            .expect("reject infrared enable");
+
+        expect_control(&listener, LED_IR_OFF_PATH);
+        expect_control(&listener, LED_MASTER_OFF_PATH);
+    });
+
+    let error = capture_pair_prefix(address, limits(), 1, |_| {})
+        .expect_err("rejected infrared enable must abort capture");
+
+    assert_eq!(
+        error.to_string(),
+        "scanner rejected enable infrared projector"
+    );
+    server.join().expect("fixture server");
 }
 
 fn capture_with_repeated_selector_response(
@@ -325,13 +398,33 @@ fn capture_with_repeated_selector_response(
         }
     });
 
-    let result = capture_depth_prefix(address, limits(), 1, |_| {});
+    let result = capture_pair_prefix(address, limits(), 1, |_| {});
     done_tx.send(()).expect("notify fixture server");
     let attempts = server.join().expect("fixture server");
     (result, attempts)
 }
 
-const SET_DEPTH_SELECTOR_PATH: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=2";
+const SET_DEPTH_SELECTOR_PATH: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=1";
+const LED_MASTER_ON_PATH: &str =
+    "/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb00%201%20%3E%20/dev/rk_preisp";
+const LED_IR_ON_PATH: &str =
+    "/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb01%201%20%3E%20/dev/rk_preisp";
+const LED_IR_OFF_PATH: &str =
+    "/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb01%200%20%3E%20/dev/rk_preisp";
+const LED_MASTER_OFF_PATH: &str =
+    "/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb00%200%20%3E%20/dev/rk_preisp";
+
+fn expect_control(listener: &TcpListener, path: &str) {
+    let mut stream = accept_before(
+        listener,
+        Instant::now() + Duration::from_secs(1),
+        "control request",
+    );
+    assert_eq!(read_path(&mut stream), path);
+    stream
+        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n[ok]")
+        .expect("write control response");
+}
 
 fn accept_before(listener: &TcpListener, deadline: Instant, stage: &str) -> std::net::TcpStream {
     loop {

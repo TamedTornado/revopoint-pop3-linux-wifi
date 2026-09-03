@@ -1,5 +1,7 @@
+use revopoint_pop3_wifi::camera_control::{DepthAutoExposure, DepthControl};
 use revopoint_pop3_wifi::depth_stream::{
-    capture_depth_prefix, capture_pair_prefix, DepthStreamError,
+    capture_depth_prefix, capture_depth_prefix_with_control, capture_pair_prefix,
+    capture_pair_prefix_with_control, DepthStreamError,
 };
 use revopoint_pop3_wifi::frame_envelope::FrameEnvelopeParser;
 use revopoint_pop3_wifi::http_stream::StreamLimits;
@@ -78,6 +80,7 @@ fn requests_vendor_verified_z16y8y8_selector_for_depth() {
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
             .expect("write trigger-mode response");
 
+        expect_control(&listener, DEPTH_AUTO_FOREGROUND_PATH);
         expect_control(&listener, LED_MASTER_ON_PATH);
         expect_control(&listener, LED_IR_ON_PATH);
 
@@ -100,13 +103,32 @@ fn requests_vendor_verified_z16y8y8_selector_for_depth() {
     });
 
     let mut body = Vec::new();
-    let received =
-        capture_depth_prefix(address, limits(), 5, |chunk| body.extend_from_slice(chunk))
-            .expect("capture Z16Y8Y8 prefix");
+    let received = capture_depth_prefix_with_control(
+        address,
+        limits(),
+        5,
+        DepthControl::AutoExposure(DepthAutoExposure::Foreground),
+        |chunk| body.extend_from_slice(chunk),
+    )
+    .expect("capture controlled Z16Y8Y8 prefix");
 
     assert_eq!(received, 5);
     assert_eq!(body, b"depth");
     server.join().expect("fixture server");
+}
+
+#[test]
+fn legacy_depth_capture_does_not_report_success_when_configuration_is_unreachable() {
+    let error = capture_depth_prefix(
+        "127.0.0.1:1".parse().expect("socket address"),
+        limits(),
+        1,
+        |_| {},
+    )
+    .expect_err("unreachable scanner must fail");
+
+    assert!(error.to_string().contains("close existing streams"));
+    assert!(error.source().is_some());
 }
 
 fn envelope(payload: &[u8]) -> Vec<u8> {
@@ -419,6 +441,56 @@ fn rejected_infrared_enable_still_turns_both_emitter_controls_off() {
     server.join().expect("fixture server");
 }
 
+#[test]
+fn rejected_depth_control_closes_streams_before_returning() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = thread::spawn(move || {
+        let (mut profile, _) = listener.accept().expect("accept profile request");
+        read_path(&mut profile);
+        profile
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write profile response");
+
+        let (mut selector, _) = listener.accept().expect("accept selector request");
+        read_path(&mut selector);
+        selector
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write selector response");
+
+        let (mut control, _) = listener.accept().expect("accept depth control");
+        assert_eq!(read_path(&mut control), DEPTH_AUTO_FOREGROUND_PATH);
+        control
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\n[failed]")
+            .expect("reject depth control");
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        listener
+            .set_nonblocking(true)
+            .expect("make cleanup listener nonblocking");
+        let mut close = accept_before(&listener, deadline, "close after control rejection");
+        assert_eq!(
+            read_path(&mut close),
+            "/cgi-bin/zx_cmd.cgi?close_stream_all"
+        );
+        close
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"result\":0}")
+            .expect("write close response");
+    });
+
+    let error = capture_pair_prefix_with_control(
+        address,
+        limits(),
+        1,
+        DepthControl::AutoExposure(DepthAutoExposure::Foreground),
+        |_| {},
+    )
+    .expect_err("rejected depth control must abort capture");
+
+    assert!(error.to_string().contains("depth auto exposure"));
+    server.join().expect("fixture server");
+}
+
 fn capture_with_repeated_selector_response(
     selector_response: &'static [u8],
 ) -> (Result<usize, DepthStreamError>, usize) {
@@ -463,6 +535,8 @@ fn capture_with_repeated_selector_response(
 }
 
 const SET_DEPTH_SELECTOR_PATH: &str = "/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=1";
+const DEPTH_AUTO_FOREGROUND_PATH: &str =
+    "/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200x912%203%20%3E%20/dev/rk_preisp";
 const LED_MASTER_ON_PATH: &str =
     "/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb00%201%20%3E%20/dev/rk_preisp";
 const LED_IR_ON_PATH: &str =

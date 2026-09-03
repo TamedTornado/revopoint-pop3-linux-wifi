@@ -341,7 +341,10 @@ fn capture_prefix(
     }
 
     if let Some(control) = control {
-        set_depth_control(address, limits, control).map_err(DepthStreamError::Control)?;
+        if let Err(error) = set_depth_control(address, limits, control) {
+            let _ = get_bounded_body(address, CLOSE_STREAMS, limits);
+            return Err(DepthStreamError::Control(error));
+        }
     }
 
     set_emitter(address, limits, LED_MASTER_ON, "enable LED master")?;

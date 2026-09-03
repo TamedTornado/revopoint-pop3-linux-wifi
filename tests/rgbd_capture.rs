@@ -1,6 +1,7 @@
+use revopoint_pop3_wifi::camera_control::{DepthAutoExposure, DepthControl};
 use revopoint_pop3_wifi::http_stream::StreamLimits;
-use revopoint_pop3_wifi::rgbd_stream::capture_rgbd_until;
 use revopoint_pop3_wifi::rgbd_stream::RgbdStreamError;
+use revopoint_pop3_wifi::rgbd_stream::{capture_rgbd_until, capture_rgbd_until_with_control};
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -57,6 +58,7 @@ fn configures_both_sensors_captures_both_endpoints_and_cleans_up() {
             ("/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_depth_output_fmt=3", br#"{"result":0}"#.as_slice()),
             ("/cgi-bin/zx_cmd.cgi?cam_type=usb&set_resolution=1&width=1280&height=800", br#"{"result":0}"#.as_slice()),
             ("/cgi-bin/zx_cmd.cgi?cam_type=mipi&set_trigger_mode=0", br#"{"result":0}"#.as_slice()),
+            ("/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200x912%203%20%3E%20/dev/rk_preisp", b"[ok]".as_slice()),
             ("/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb00%201%20%3E%20/dev/rk_preisp", b"[ok]".as_slice()),
             ("/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb01%201%20%3E%20/dev/rk_preisp", b"[ok]".as_slice()),
             ("/cgi-bin/zx_cmd.cgi?system_cmd=echo%20s%200xb02%201%20%3E%20/dev/rk_preisp", b"[ok]".as_slice()),
@@ -112,9 +114,10 @@ fn configures_both_sensors_captures_both_endpoints_and_cleans_up() {
     let mut depth = Vec::new();
     let mut rgb = Vec::new();
 
-    let received = capture_rgbd_until(
+    let received = capture_rgbd_until_with_control(
         address,
         limits(),
+        DepthControl::AutoExposure(DepthAutoExposure::Foreground),
         |chunk| {
             depth.extend_from_slice(chunk);
             depth.len() >= 5

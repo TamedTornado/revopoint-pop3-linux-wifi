@@ -1,0 +1,7 @@
+{
+  "session_id": "object-36-view",
+  "frame_count": 36,
+  "direction": "counterclockwise_viewed_from_axis_tip",
+  "axis_depth_camera": [0.0, 1.0, 0.0],
+  "center_mm_depth_camera": [0.0, 0.0, 250.0]
+}

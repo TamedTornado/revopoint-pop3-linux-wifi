@@ -226,19 +226,30 @@ unexpected filenames, malformed images, and attempts to overwrite a frame are
 rejected.
 
 For a stationary scanner and known-angle turntable, copy and edit
-`examples/turntable-frame.json`, replacing the example axis and center with
-measured values in the left depth-camera frame, then run:
+`examples/turntable-session.json`, replacing its example axis and center with
+measured values in the left depth-camera frame. Generate the complete rotation
+schedule once:
+
+```sh
+cargo run --release -- --write-turntable-schedule \
+  examples/turntable-session.json /tmp/car-schedule
+```
+
+The generated files are ordinary per-frame metadata accepted by the capture
+command. Rotate the object to the printed angle, then capture that index:
 
 ```sh
 cargo run --release -- --capture-turntable \
-  192.168.8.245 /tmp/object examples/turntable-frame.json
+  192.168.8.245 /tmp/object /tmp/car-schedule/frame-000000.json
 ```
 
 The metadata records a safe session ID, frame index and expected count,
 commanded and optional observed angles, an unambiguous direction viewed from
 the axis tip, a unit rotation axis, and the turntable center in millimetres.
 Turntable frame directories sort by zero-padded frame index, so an interrupted
-session can resume at the first missing index without guessing from timestamps.
+session can resume at the first missing index without regenerating angles or
+guessing from timestamps. Schedule generation refuses to overwrite an existing
+directory.
 
 Once every frame in the declared rotation exists, merge the session offline:
 

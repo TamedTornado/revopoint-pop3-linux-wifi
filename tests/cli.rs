@@ -24,6 +24,7 @@ fn help_is_available_without_scanner_hardware() {
     assert!(stdout.contains("--set-depth-auto-exposure"));
     assert!(stdout.contains("--depth-auto-exposure"));
     assert!(stdout.contains("--merge-turntable"));
+    assert!(stdout.contains("--write-turntable-schedule"));
     assert!(stdout.contains("usb is reserved"));
     assert!(!stdout.contains("--measure-plane"));
     assert!(stdout.contains("--ros2-depth"));

@@ -20,6 +20,7 @@
     "hardware_concurrent_rgbd_transport_pass": true,
     "direct_usb_media_pass": false,
     "offline_turntable_merge_pass": true,
+    "turntable_schedule_pass": true,
     "ros_depth_camera_pass": true,
     "rviz_live_acceptance_pass": false
   },
@@ -62,7 +63,7 @@
       "environment": "Ubuntu 24.04 with pinned Rust mutation tool",
       "command": "cargo mutants -f src/depth_decode.rs -j 1 --timeout 10",
       "status": "PARTIAL",
-      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the PAIR and RGB/JPEG decoders, RGB controls, RGB calibration parser, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, normalized global-shift diagnostic, map/Q parser/full reprojection, metric Z16/PGM, robust depth-statistics, and turntable alignment focused sets catch all viable mutants exercised. Turntable alignment and archive discovery tested 79 mutants: 74 caught and five unviable; the changed archive replay surface tested 17 mutants: 12 caught and five unviable. Neither set had misses or timeouts. The typed depth-control set tested 48 mutants: 45 caught, three unviable, none missed or timed out. The controlled depth-stream set tested 62 mutants: 51 caught, three unviable, eight timeout-killed, none missed. The initial RGB set caught 40 mutants with two timeout-killed and two unviable, with none missed. The RGB calibration set caught 78 mutants with five unviable and none missed. The concurrent RGB-D transport set caught 14 mutants with one timeout-killed and one unviable, with none missed. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
+      "claim": "Existing depth-stream, envelope, decoder, calibration, and ROS mapping mutation sets remain covered; the PAIR and RGB/JPEG decoders, RGB controls, RGB calibration parser, emitter fail-closed paths, stereo matcher/disparity encoder, spatial consensus/median filter, normalized global-shift diagnostic, map/Q parser/full reprojection, metric Z16/PGM, robust depth-statistics, and turntable focused sets catch all viable mutants exercised. Turntable alignment and archive discovery tested 79 mutants: 74 caught and five unviable; the changed archive replay surface tested 17 mutants: 12 caught and five unviable; schedule generation tested 15 mutants: 13 caught and two unviable. None of those sets had misses or timeouts. The typed depth-control set tested 48 mutants: 45 caught, three unviable, none missed or timed out. The controlled depth-stream set tested 62 mutants: 51 caught, three unviable, eight timeout-killed, none missed. The initial RGB set caught 40 mutants with two timeout-killed and two unviable, with none missed. The RGB calibration set caught 78 mutants with five unviable and none missed. The concurrent RGB-D transport set caught 14 mutants with one timeout-killed and one unviable, with none missed. Rectification, HTTP, and ROS runtime-adapter mutation gaps remain open"
     },
     {
       "id": "hardware-byte-stream",
@@ -159,6 +160,14 @@
       "command": "cargo test --locked --test capture_archive",
       "status": "PASS",
       "claim": "The archive validates session and sequence identity, commanded and optional observed angles, direction viewed from the axis tip, a near-unit axis, and a finite center in the depth-camera frame. Invalid and ambiguous values are rejected before capture"
+    },
+    {
+      "id": "turntable-schedule",
+      "tier": "offline",
+      "environment": "Ubuntu 24.04 or compatible Linux",
+      "command": "cargo test --locked --test turntable_schedule",
+      "status": "PASS",
+      "claim": "One validated session specification deterministically expands into a bounded full rotation of zero-padded per-frame capture manifests. Angles never depend on filenames, existing output is not overwritten, and invalid counts, IDs, axes, or centers fail before publication."
     },
     {
       "id": "turntable-axis-measurement",

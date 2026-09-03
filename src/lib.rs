@@ -28,6 +28,7 @@ pub mod stereo_calibration;
 pub mod stereo_depth;
 pub mod stereo_match;
 pub mod turntable_merge;
+pub mod turntable_schedule;
 
 const VID: u16 = 0x2207;
 const PID: u16 = 0x110c;
@@ -975,6 +976,18 @@ fn load_turntable_record(path: &str) -> Result<capture_archive::TurntableRecord,
     Ok(record)
 }
 
+fn write_turntable_schedule(specification: &str, output: &str) -> Result<(), Box<dyn Error>> {
+    let bytes = std::fs::read(specification)?;
+    let spec: turntable_schedule::TurntableScheduleSpec = serde_json::from_slice(&bytes)?;
+    let paths = turntable_schedule::write_schedule(std::path::Path::new(output), &spec)?;
+    println!(
+        "Wrote turntable schedule: session={}, frames={}, directory={output}",
+        spec.session_id,
+        paths.len()
+    );
+    Ok(())
+}
+
 #[cfg(feature = "ros2")]
 fn ros2_depth(ip: &str) -> Result<(), Box<dyn Error>> {
     use rclrs::CreateBasicExecutor;
@@ -1226,6 +1239,15 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 }
             };
         }
+        [argument, specification, output] if argument == "--write-turntable-schedule" => {
+            return match write_turntable_schedule(specification, output) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
         [argument, ip] if argument == "--inspect-rgb-calibration" => {
             return match inspect_rgb_calibration(ip) {
                 Ok(()) => 0,
@@ -1245,7 +1267,7 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             }
         }
         [argument] if argument == "--help" || argument == "-h" => {
-            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --capture-turntable IP OUTPUT_PREFIX METADATA_JSON | --replay-archive DIRECTORY OUTPUT_PLY | --merge-turntable ARCHIVE_ROOT SESSION_ID OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --capture-turntable IP OUTPUT_PREFIX METADATA_JSON | --write-turntable-schedule SPEC_JSON OUTPUT_DIRECTORY | --replay-archive DIRECTORY OUTPUT_PLY | --merge-turntable ARCHIVE_ROOT SESSION_ID OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
@@ -1265,6 +1287,9 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 "  --capture-turntable IP OUTPUT_PREFIX METADATA_JSON  Capture with explicit angle and axis metadata"
             );
             println!(
+                "  --write-turntable-schedule SPEC_JSON OUTPUT_DIRECTORY  Generate every angle manifest for one rotation"
+            );
+            println!(
                 "  --inspect-rgb-calibration IP  Print RGB intrinsics and left-to-RGB transform"
             );
             println!("  --depth-controls IP  Show supported depth exposure controls");
@@ -1280,7 +1305,7 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             return 0;
         }
         _ => {
-            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --capture-turntable IP OUTPUT_PREFIX METADATA_JSON | --replay-archive DIRECTORY OUTPUT_PLY | --merge-turntable ARCHIVE_ROOT SESSION_ID OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --capture-turntable IP OUTPUT_PREFIX METADATA_JSON | --write-turntable-schedule SPEC_JSON OUTPUT_DIRECTORY | --replay-archive DIRECTORY OUTPUT_PLY | --merge-turntable ARCHIVE_ROOT SESSION_ID OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             return 2;
         }
     };

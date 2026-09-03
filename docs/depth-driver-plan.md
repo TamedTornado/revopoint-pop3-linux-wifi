@@ -63,9 +63,11 @@ Identify only the wire fields required to delimit and validate frames. Test
 every header split, concatenated frames, corruption, truncation, and size
 limits before trusting hardware frame counts.
 
-In progress: the independently observed and binary-corroborated outer envelope
-is implemented and mutation-clean. Hardware runs recovered complete compressed
-PAIR frames. Inner dimensions and continuity fields are not yet established.
+The independently observed and binary-corroborated outer envelope is implemented
+and mutation-clean. Hardware runs recovered complete compressed PAIR and
+Z16Y8Y8 frames. The observed eight-byte envelope contains no dimensions or
+continuity field; those properties are validated at the decoded profile layer
+rather than assigned to unknown bytes.
 
 ### 4. Decode the depth plane ([#4](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/4))
 
@@ -73,11 +75,13 @@ Decode compressed payloads in clean-room Rust using project-owned fixtures.
 Return an explicit width, height, stride, encoding, and pixel buffer. Reject
 malformed data without panics or unbounded allocation.
 
-Corrected status: QuickLZ decoding works, but the live selector is `PAIR`, not
-Z16. Its two contiguous Y8 planes are now decoded explicitly. RevoScan's own
-`start depth stream` call site passes format 4 (`PAIR`) into the camera API,
-confirming that metric depth is derived later on the host. Issue #4 must remain
-open until that stereo reconstruction boundary is independently implemented.
+Completed status: QuickLZ and PAIR decoding work, and the distinct selector-3
+`Z16Y8Y8` path now yields scanner-computed depth. Tracing the obsolete vendor
+SDK as a black-box network oracle exposed the missing close-stream and
+free-running-trigger operations. The clean-room Rust path replays those
+commands, validates the 1,024,000-byte decoded layout, and returns explicit
+640×400 width, height, stride, little-endian Z16 encoding, 0.1 mm scale, and
+separate left/right Y8 planes. No vendor code or capture is committed.
 
 First reconstruction slice: the 148-byte left/right map-parameter records are
 parsed and validated in clean-room Rust. The Y8 planes can be rectified using
@@ -111,9 +115,11 @@ measured physical targets. The output of this phase is a calibrated depth
 frame, not merely decoded integers.
 
 The device depth-unit divisor and read-only depth intrinsics can be parsed and
-scaled, but they cannot be applied directly to PAIR intensities. All live metric
-claims are withdrawn pending independently implemented rectification, disparity,
-and depth reconstruction from the verified binocular input.
+scaled. Direct Z16Y8Y8 acquisition now applies the observed 0.1 mm unit scale;
+a live wall run reported 167.8 mm median depth and 1.5 mm MAD. Issue #5 remains
+open because the wall distance was only estimated at 150–300 mm: measured
+targets at multiple distances and optical-frame/rectification qualification are
+still required.
 
 ### 5a. Mutation-test deterministic contracts ([#9](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/9))
 

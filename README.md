@@ -240,6 +240,22 @@ the axis tip, a unit rotation axis, and the turntable center in millimetres.
 Turntable frame directories sort by zero-padded frame index, so an interrupted
 session can resume at the first missing index without guessing from timestamps.
 
+Once every frame in the declared rotation exists, merge the session offline:
+
+```sh
+cargo run --release -- --merge-turntable \
+  /tmp/object-archive car-rotation /tmp/car-rotation.ply
+```
+
+The merge reads calibration-backed points from each archive and applies the
+inverse of the recorded object rotation around the declared axis and center.
+It prefers an observed angle when present, sorts by the explicit frame index,
+and rejects missing, duplicate, or inconsistent frames. The result is an
+ordinary binary colored PLY for CloudCompare or MeshLab. This is deterministic
+known-pose alignment, not ICP and not surface meshing; an inaccurate physical
+axis or center will therefore remain visible rather than being hidden by an
+optimizer.
+
 The disparity image is currently a diagnostic, not qualified metric depth. It
 uses a bounded 0–160 pixel search, a 15×15 SAD support window, a provisional 1%
 best-versus-runner-up cost margin, and a one-pixel left/right consistency check.

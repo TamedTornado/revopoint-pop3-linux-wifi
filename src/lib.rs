@@ -27,6 +27,7 @@ pub mod scanner_input;
 pub mod stereo_calibration;
 pub mod stereo_depth;
 pub mod stereo_match;
+pub mod turntable_merge;
 
 const VID: u16 = 0x2207;
 const PID: u16 = 0x110c;
@@ -915,6 +916,21 @@ fn replay_archive(directory: &str, output: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn merge_turntable_archive(
+    archive_root: &str,
+    session_id: &str,
+    output: &str,
+) -> Result<(), Box<dyn Error>> {
+    let points =
+        turntable_merge::merge_archive_session(std::path::Path::new(archive_root), session_id)?;
+    let point_count = points.len();
+    std::fs::write(output, rgb_registration::encode_binary_ply(&points))?;
+    println!(
+        "Merged turntable archive: root={archive_root}, session={session_id}, colored={output}, points={point_count}"
+    );
+    Ok(())
+}
+
 fn parse_manual_depth_control(value: &str) -> Result<camera_control::DepthControl, Box<dyn Error>> {
     Ok(camera_control::DepthControl::ManualExposureUs(
         value
@@ -1201,6 +1217,15 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 }
             };
         }
+        [argument, archive_root, session_id, output] if argument == "--merge-turntable" => {
+            return match merge_turntable_archive(archive_root, session_id, output) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
         [argument, ip] if argument == "--inspect-rgb-calibration" => {
             return match inspect_rgb_calibration(ip) {
                 Ok(()) => 0,
@@ -1220,7 +1245,7 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             }
         }
         [argument] if argument == "--help" || argument == "-h" => {
-            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --capture-turntable IP OUTPUT_PREFIX METADATA_JSON | --replay-archive DIRECTORY OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --capture-turntable IP OUTPUT_PREFIX METADATA_JSON | --replay-archive DIRECTORY OUTPUT_PLY | --merge-turntable ARCHIVE_ROOT SESSION_ID OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
@@ -1232,6 +1257,9 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             );
             println!(
                 "  --replay-archive DIRECTORY OUTPUT_PLY  Rebuild a colored cloud without the scanner"
+            );
+            println!(
+                "  --merge-turntable ARCHIVE_ROOT SESSION_ID OUTPUT_PLY  Align one complete rotation into a colored cloud"
             );
             println!(
                 "  --capture-turntable IP OUTPUT_PREFIX METADATA_JSON  Capture with explicit angle and axis metadata"
@@ -1252,7 +1280,7 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             return 0;
         }
         _ => {
-            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --capture-turntable IP OUTPUT_PREFIX METADATA_JSON | --replay-archive DIRECTORY OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --capture-turntable IP OUTPUT_PREFIX METADATA_JSON | --replay-archive DIRECTORY OUTPUT_PLY | --merge-turntable ARCHIVE_ROOT SESSION_ID OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             return 2;
         }
     };

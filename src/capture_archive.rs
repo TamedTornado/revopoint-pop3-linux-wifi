@@ -129,12 +129,25 @@ pub fn write_frame_archive(
 }
 
 pub fn replay_colored_ply(directory: &Path) -> Result<Vec<u8>, ArchiveError> {
+    let (_, points) = replay_colored_points(directory)?;
+    Ok(encode_binary_ply(&points))
+}
+
+pub fn read_manifest(directory: &Path) -> Result<ArchiveManifest, ArchiveError> {
     let manifest = fs::read(directory.join(MANIFEST_FILE)).map_err(io_fail)?;
-    let manifest: ArchiveManifest = serde_json::from_slice(&manifest).map_err(json_fail)?;
+    let manifest = serde_json::from_slice(&manifest).map_err(json_fail)?;
     validate_manifest(&manifest)?;
+    Ok(manifest)
+}
+
+pub fn replay_colored_points(
+    directory: &Path,
+) -> Result<(ArchiveManifest, Vec<crate::rgb_registration::ColoredPoint>), ArchiveError> {
+    let manifest = read_manifest(directory)?;
     let depth_raw = fs::read(directory.join(&manifest.depth.raw_file)).map_err(io_fail)?;
     let rgb_jpeg = fs::read(directory.join(&manifest.rgb.jpeg_file)).map_err(io_fail)?;
-    build_outputs(&manifest, &depth_raw, &rgb_jpeg).map(|(colored_ply, _)| colored_ply)
+    let (_, points) = reconstruct_frame(&manifest, &depth_raw, &rgb_jpeg)?;
+    Ok((manifest, points))
 }
 
 fn build_outputs(
@@ -142,6 +155,16 @@ fn build_outputs(
     depth_raw: &[u8],
     rgb_jpeg: &[u8],
 ) -> Result<(Vec<u8>, Vec<u8>), ArchiveError> {
+    let (depth, points) = reconstruct_frame(manifest, depth_raw, rgb_jpeg)?;
+    let depth_pgm = encode_z16_pgm(&depth).map_err(|_| fail("archive depth PGM is invalid"))?;
+    Ok((encode_binary_ply(&points), depth_pgm))
+}
+
+fn reconstruct_frame(
+    manifest: &ArchiveManifest,
+    depth_raw: &[u8],
+    rgb_jpeg: &[u8],
+) -> Result<(DepthPlane, Vec<crate::rgb_registration::ColoredPoint>), ArchiveError> {
     validate_manifest(manifest)?;
     let depth = DepthPlane {
         width: manifest.depth.width,
@@ -188,8 +211,7 @@ fn build_outputs(
     if points.is_empty() {
         return Err(fail("archive RGB-D frame has no registered points"));
     }
-    let depth_pgm = encode_z16_pgm(&depth).map_err(|_| fail("archive depth PGM is invalid"))?;
-    Ok((encode_binary_ply(&points), depth_pgm))
+    Ok((depth, points))
 }
 
 fn validate_manifest(manifest: &ArchiveManifest) -> Result<(), ArchiveError> {

@@ -15,6 +15,7 @@ const DEPTH_FILE: &str = "depth.z16le";
 const DEPTH_PGM_FILE: &str = "depth-mm.pgm";
 const RGB_FILE: &str = "rgb.jpg";
 const COLORED_FILE: &str = "colored.ply";
+const AXIS_SQUARED_TOLERANCE: f32 = 0.015625;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ArchiveManifest {
@@ -26,6 +27,27 @@ pub struct ArchiveManifest {
     pub rgb: RgbRecord,
     pub depth_to_rgb: ExtrinsicsRecord,
     pub colored_ply_file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turntable: Option<TurntableRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TurntableRecord {
+    pub session_id: String,
+    pub frame_index: u32,
+    pub expected_frame_count: u32,
+    pub commanded_angle_degrees: f32,
+    pub observed_angle_degrees: Option<f32>,
+    pub direction: RotationDirection,
+    pub axis_depth_camera: [f32; 3],
+    pub center_mm_depth_camera: [f32; 3],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RotationDirection {
+    ClockwiseViewedFromAxisTip,
+    CounterclockwiseViewedFromAxisTip,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -185,6 +207,35 @@ fn validate_manifest(manifest: &ArchiveManifest) -> Result<(), ArchiveError> {
         || manifest.colored_ply_file != COLORED_FILE
     {
         return Err(fail("archive manifest is inconsistent"));
+    }
+    if let Some(turntable) = &manifest.turntable {
+        validate_turntable_record(turntable)?;
+    }
+    Ok(())
+}
+
+pub fn validate_turntable_record(turntable: &TurntableRecord) -> Result<(), ArchiveError> {
+    let angle_is_valid = |angle: f32| angle.is_finite() && (0.0..360.0).contains(&angle);
+    let axis_squared = turntable
+        .axis_depth_camera
+        .iter()
+        .map(|component| component * component)
+        .sum::<f32>();
+    if !valid_frame_name(&turntable.session_id)
+        || turntable.expected_frame_count == 0
+        || turntable.frame_index >= turntable.expected_frame_count
+        || !angle_is_valid(turntable.commanded_angle_degrees)
+        || turntable
+            .observed_angle_degrees
+            .is_some_and(|angle| !angle_is_valid(angle))
+        || !axis_squared.is_finite()
+        || (axis_squared - 1.0).abs() > AXIS_SQUARED_TOLERANCE
+        || !turntable
+            .center_mm_depth_camera
+            .iter()
+            .all(|component| component.is_finite())
+    {
+        return Err(fail("archive turntable metadata is invalid"));
     }
     Ok(())
 }

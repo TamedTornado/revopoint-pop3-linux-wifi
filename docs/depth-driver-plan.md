@@ -173,7 +173,12 @@ loads as a 163,174-point cloud. Pixel-level alignment remains unqualified on the
 uniform wall. A versioned, atomically published archive now retains exact Z16,
 viewable depth PGM, JPEG, colored PLY, timestamps, and calibration. An offline
 command reproduced the archived PLY byte-for-byte without contacting the
-scanner. Turntable angle metadata, masking, and dataset adapters remain open.
+scanner. Optional turntable metadata now records sequence position, commanded
+and observed angles, direction viewed from the axis tip, and a validated axis
+and center in the depth-camera frame. A dedicated command validates that JSON
+before acquisition and names frames by session and zero-padded index for
+deterministic resumption. Physical axis/center measurement, masking, and dataset
+adapters remain open.
 
 ## Red-green workflow
 

@@ -1,6 +1,7 @@
 use revopoint_pop3_wifi::capture_archive::{
-    replay_colored_ply, valid_frame_name, write_frame_archive, ArchiveFrame, ArchiveManifest,
-    DepthRecord, ExtrinsicsRecord, RgbRecord,
+    replay_colored_ply, valid_frame_name, validate_turntable_record, write_frame_archive,
+    ArchiveFrame, ArchiveManifest, DepthRecord, ExtrinsicsRecord, RgbRecord, RotationDirection,
+    TurntableRecord,
 };
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,6 +34,7 @@ fn manifest() -> ArchiveManifest {
             translation_mm: [0.0; 3],
         },
         colored_ply_file: "colored.ply".to_owned(),
+        turntable: None,
     }
 }
 
@@ -70,7 +72,9 @@ fn atomically_writes_a_self_describing_replayable_frame() {
     let replayed = replay_colored_ply(&directory).expect("offline replay");
     assert_eq!(replayed, fs::read(directory.join("colored.ply")).unwrap());
 
-    fs::remove_dir_all(root).unwrap();
+    if root.exists() {
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]
@@ -167,7 +171,9 @@ fn rejects_unsafe_names_inconsistent_metadata_and_overwrite() {
     let error = write_frame_archive(&root, "bad/name", frame()).unwrap_err();
     assert_eq!(error.to_string(), "archive frame name is invalid");
 
-    fs::remove_dir_all(root).unwrap();
+    if root.exists() {
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]
@@ -177,5 +183,115 @@ fn frame_names_are_single_safe_path_components() {
     }
     for invalid in ["", ".", "../escape", "bad name", "slash/name", "é"] {
         assert!(!valid_frame_name(invalid));
+    }
+}
+
+#[test]
+fn preserves_explicit_turntable_pose_and_sequence_metadata() {
+    let root = temporary_root();
+    let depth_raw = [1_000_u16.to_le_bytes(), 1_000_u16.to_le_bytes()].concat();
+    let mut manifest = manifest();
+    manifest.turntable = Some(TurntableRecord {
+        session_id: "teapot-36-view".to_owned(),
+        frame_index: 9,
+        expected_frame_count: 36,
+        commanded_angle_degrees: 90.0,
+        observed_angle_degrees: Some(90.2),
+        direction: RotationDirection::CounterclockwiseViewedFromAxisTip,
+        axis_depth_camera: [0.0, 1.0, 0.0],
+        center_mm_depth_camera: [10.0, 20.0, 250.0],
+    });
+
+    let directory = write_frame_archive(
+        &root,
+        "frame-000009",
+        ArchiveFrame {
+            manifest: manifest.clone(),
+            depth_raw: &depth_raw,
+            rgb_jpeg: include_bytes!("fixtures/rgb-2x1.jpg"),
+        },
+    )
+    .expect("turntable frame");
+    let written: ArchiveManifest =
+        serde_json::from_slice(&fs::read(directory.join("manifest.json")).unwrap()).unwrap();
+
+    assert_eq!(written.turntable, manifest.turntable);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn rejects_ambiguous_or_inconsistent_turntable_metadata() {
+    let root = temporary_root();
+    let depth_raw = [1_000_u16.to_le_bytes(), 1_000_u16.to_le_bytes()].concat();
+    let valid = TurntableRecord {
+        session_id: "object-1".to_owned(),
+        frame_index: 0,
+        expected_frame_count: 36,
+        commanded_angle_degrees: 0.0,
+        observed_angle_degrees: None,
+        direction: RotationDirection::ClockwiseViewedFromAxisTip,
+        axis_depth_camera: [0.0, 1.0, 0.0],
+        center_mm_depth_camera: [0.0, 0.0, 250.0],
+    };
+    assert!(validate_turntable_record(&TurntableRecord {
+        axis_depth_camera: [1.0, 0.125, 0.0],
+        ..valid.clone()
+    })
+    .is_ok());
+    let invalid = [
+        TurntableRecord {
+            session_id: "bad id".to_owned(),
+            ..valid.clone()
+        },
+        TurntableRecord {
+            expected_frame_count: 0,
+            ..valid.clone()
+        },
+        TurntableRecord {
+            frame_index: 36,
+            ..valid.clone()
+        },
+        TurntableRecord {
+            commanded_angle_degrees: 360.0,
+            ..valid.clone()
+        },
+        TurntableRecord {
+            commanded_angle_degrees: f32::NAN,
+            ..valid.clone()
+        },
+        TurntableRecord {
+            observed_angle_degrees: Some(-1.0),
+            ..valid.clone()
+        },
+        TurntableRecord {
+            axis_depth_camera: [0.0; 3],
+            ..valid.clone()
+        },
+        TurntableRecord {
+            axis_depth_camera: [f32::NAN, 0.0, 0.0],
+            ..valid.clone()
+        },
+        TurntableRecord {
+            center_mm_depth_camera: [0.0, f32::NAN, 0.0],
+            ..valid
+        },
+    ];
+
+    for (index, turntable) in invalid.into_iter().enumerate() {
+        let mut manifest = manifest();
+        manifest.turntable = Some(turntable);
+        assert!(write_frame_archive(
+            &root,
+            &format!("invalid-turntable-{index}"),
+            ArchiveFrame {
+                manifest,
+                depth_raw: &depth_raw,
+                rgb_jpeg: include_bytes!("fixtures/rgb-2x1.jpg"),
+            }
+        )
+        .is_err());
+    }
+    if root.exists() {
+        fs::remove_dir_all(root).unwrap();
     }
 }

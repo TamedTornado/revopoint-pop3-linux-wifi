@@ -188,6 +188,21 @@ manifest have been written. Unsafe path components, inconsistent timestamps,
 unexpected filenames, malformed images, and attempts to overwrite a frame are
 rejected.
 
+For a stationary scanner and known-angle turntable, copy and edit
+`examples/turntable-frame.json`, replacing the example axis and center with
+measured values in the left depth-camera frame, then run:
+
+```sh
+cargo run --release -- --capture-turntable \
+  192.168.8.245 /tmp/object examples/turntable-frame.json
+```
+
+The metadata records a safe session ID, frame index and expected count,
+commanded and optional observed angles, an unambiguous direction viewed from
+the axis tip, a unit rotation axis, and the turntable center in millimetres.
+Turntable frame directories sort by zero-padded frame index, so an interrupted
+session can resume at the first missing index without guessing from timestamps.
+
 The disparity image is currently a diagnostic, not qualified metric depth. It
 uses a bounded 0–160 pixel search, a 15×15 SAD support window, a provisional 1%
 best-versus-runner-up cost margin, and a one-pixel left/right consistency check.

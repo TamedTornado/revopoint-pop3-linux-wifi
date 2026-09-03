@@ -664,7 +664,11 @@ fn smoke_rgb(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
+fn smoke_rgbd(
+    ip: &str,
+    output_prefix: &str,
+    turntable: Option<capture_archive::TurntableRecord>,
+) -> Result<(), Box<dyn Error>> {
     const CANDIDATE_FRAMES: usize = 8;
 
     let address = SocketAddr::new(ip.parse::<IpAddr>()?, 80);
@@ -771,7 +775,15 @@ fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
         ));
     }
     let archive_root = format!("{output_prefix}-archive");
-    let archive_name = format!("frame-{:010}", depth.device_timestamp_ms);
+    let archive_name = turntable.as_ref().map_or_else(
+        || format!("frame-{:010}", depth.device_timestamp_ms),
+        |metadata| {
+            format!(
+                "{}-{:06}-{:010}",
+                metadata.session_id, metadata.frame_index, depth.device_timestamp_ms
+            )
+        },
+    );
     let archive_directory = capture_archive::write_frame_archive(
         std::path::Path::new(&archive_root),
         &archive_name,
@@ -813,6 +825,7 @@ fn smoke_rgbd(ip: &str, output_prefix: &str) -> Result<(), Box<dyn Error>> {
                     translation_mm: calibration.left_to_rgb.translation_mm,
                 },
                 colored_ply_file: "colored.ply".to_owned(),
+                turntable,
             },
             depth_raw: &depth.depth.bytes,
             rgb_jpeg: &rgb_payload[..rgb.encoded_len],
@@ -871,6 +884,13 @@ fn replay_archive(directory: &str, output: &str) -> Result<(), Box<dyn Error>> {
     std::fs::write(output, ply)?;
     println!("Replayed calibrated RGB-D archive: input={directory}, colored={output}");
     Ok(())
+}
+
+fn load_turntable_record(path: &str) -> Result<capture_archive::TurntableRecord, Box<dyn Error>> {
+    let bytes = std::fs::read(path)?;
+    let record = serde_json::from_slice(&bytes)?;
+    capture_archive::validate_turntable_record(&record)?;
+    Ok(record)
 }
 
 #[cfg(feature = "ros2")]
@@ -963,7 +983,18 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             };
         }
         [argument, ip, output_prefix] if argument == "--smoke-rgbd" => {
-            return match smoke_rgbd(ip, output_prefix) {
+            return match smoke_rgbd(ip, output_prefix, None) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    1
+                }
+            };
+        }
+        [argument, ip, output_prefix, metadata] if argument == "--capture-turntable" => {
+            return match load_turntable_record(metadata)
+                .and_then(|record| smoke_rgbd(ip, output_prefix, Some(record)))
+            {
                 Ok(()) => 0,
                 Err(error) => {
                     eprintln!("Error: {error}");
@@ -999,7 +1030,7 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             }
         }
         [argument] if argument == "--help" || argument == "-h" => {
-            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --replay-archive DIRECTORY OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            println!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --capture-turntable IP OUTPUT_PREFIX METADATA_JSON | --replay-archive DIRECTORY OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             println!();
             println!("Options:");
             println!("  --write       Provision Wi-Fi client credentials over USB");
@@ -1013,6 +1044,9 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
                 "  --replay-archive DIRECTORY OUTPUT_PLY  Rebuild a colored cloud without the scanner"
             );
             println!(
+                "  --capture-turntable IP OUTPUT_PREFIX METADATA_JSON  Capture with explicit angle and axis metadata"
+            );
+            println!(
                 "  --inspect-rgb-calibration IP  Print RGB intrinsics and left-to-RGB transform"
             );
             println!("  --smoke-pair IP OUTPUT_PREFIX  Save left/right infrared PGM images");
@@ -1021,7 +1055,7 @@ pub fn main_entry(arguments: impl IntoIterator<Item = String>) -> i32 {
             return 0;
         }
         _ => {
-            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --replay-archive DIRECTORY OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
+            eprintln!("Usage: {program} [--write | --diagnose | --smoke-depth IP OUTPUT_PREFIX | --smoke-rgb IP OUTPUT_PREFIX | --smoke-rgbd IP OUTPUT_PREFIX | --capture-turntable IP OUTPUT_PREFIX METADATA_JSON | --replay-archive DIRECTORY OUTPUT_PLY | --inspect-rgb-calibration IP | --smoke-pair IP OUTPUT_PREFIX | --ros2-depth IP]");
             return 2;
         }
     };

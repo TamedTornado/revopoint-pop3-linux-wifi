@@ -134,6 +134,22 @@
       "claim": "The live command atomically published exact Z16, a viewable millimetre PGM, RGB JPEG, colored PLY, and a versioned calibration/timestamp manifest. Offline replay regenerated a byte-identical 163175-point PLY, which stock CloudCompare loaded and processed without the scanner"
     },
     {
+      "id": "turntable-metadata-contract",
+      "tier": "offline",
+      "environment": "synthetic deterministic archive fixtures",
+      "command": "cargo test --locked --test capture_archive",
+      "status": "PASS",
+      "claim": "The archive validates session and sequence identity, commanded and optional observed angles, direction viewed from the axis tip, a near-unit axis, and a finite center in the depth-camera frame. Invalid and ambiguous values are rejected before capture"
+    },
+    {
+      "id": "turntable-axis-measurement",
+      "tier": "manual-hardware",
+      "environment": "POP 3 Plus on tripod with a measured physical turntable",
+      "command": "not yet performed",
+      "status": "PARTIAL",
+      "claim": "The capture contract and manual metadata command exist, but the physical turntable axis and center have not yet been measured in the depth-camera frame and no full rotation has been recorded"
+    },
+    {
       "id": "metric-depth",
       "tier": "hardware",
       "environment": "POP 3 Plus and measured physical targets",

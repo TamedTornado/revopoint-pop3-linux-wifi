@@ -114,6 +114,28 @@ fn identity_rectification_preserves_a_y8_image() {
 }
 
 #[test]
+fn rectification_bilinearly_samples_subpixel_coordinates() {
+    let (_, mut parameters) = fixture();
+    parameters.calibration_width = 3;
+    parameters.calibration_height = 3;
+    parameters.camera_matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+    parameters.distortion = [0.0; 5];
+    parameters.inverse_rectification = [1.0, 0.0, 0.5, 0.0, 1.0, 0.5, 0.0, 0.0, 1.0];
+    let input = vec![0, 10, 20, 100, 110, 120, 200, 210, 220];
+
+    let rectified = rectify_y8(&input, 3, 3, parameters).expect("subpixel rectification");
+
+    assert_eq!(rectified[0], 55);
+    assert_eq!(rectified[1], 65);
+    assert_eq!(rectified[3], 155);
+    assert_eq!(rectified[2], 0, "out-of-bounds samples remain invalid");
+
+    parameters.inverse_rectification = [1.0, 0.0, 0.5, 0.0, 1.0, -0.5, 0.0, 0.0, 1.0];
+    let rectified = rectify_y8(&input, 3, 3, parameters).expect("bounded rectification");
+    assert_eq!(rectified[0], 0, "negative source rows remain invalid");
+}
+
+#[test]
 fn rectification_rejects_invalid_image_layout_and_projection() {
     let (_, mut parameters) = fixture();
     assert!(rectify_y8(&[0; 11], 4, 3, parameters).is_err());

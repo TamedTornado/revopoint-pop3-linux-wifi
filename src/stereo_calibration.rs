@@ -302,18 +302,26 @@ pub fn rectify_y8(
             if !source_x.is_finite() || !source_y.is_finite() {
                 continue;
             }
-            let source_x = source_x.round() as i64;
-            let source_y = source_y.round() as i64;
-            if source_x < 0
-                || source_y < 0
-                || source_x >= i64::from(width)
-                || source_y >= i64::from(height)
+            let source_x0 = source_x.floor() as i64;
+            let source_y0 = source_y.floor() as i64;
+            let source_x1 = source_x.ceil() as i64;
+            let source_y1 = source_y.ceil() as i64;
+            if source_x0 < 0
+                || source_y0 < 0
+                || source_x1 >= i64::from(width)
+                || source_y1 >= i64::from(height)
             {
                 continue;
             }
-            let source_index = source_y as usize * width as usize + source_x as usize;
+            let fraction_x = source_x - source_x0 as f32;
+            let fraction_y = source_y - source_y0 as f32;
+            let sample = |x: i64, y: i64| input[y as usize * width as usize + x as usize] as f32;
+            let top = sample(source_x0, source_y0) * (1.0 - fraction_x)
+                + sample(source_x1, source_y0) * fraction_x;
+            let bottom = sample(source_x0, source_y1) * (1.0 - fraction_x)
+                + sample(source_x1, source_y1) * fraction_x;
             let target_index = target_y as usize * width as usize + target_x as usize;
-            output[target_index] = input[source_index];
+            output[target_index] = (top * (1.0 - fraction_y) + bottom * fraction_y).round() as u8;
         }
     }
     Ok(output)

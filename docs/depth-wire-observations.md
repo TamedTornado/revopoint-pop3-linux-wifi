@@ -93,6 +93,16 @@ records. Each begins with calibration height, width, and a five-coefficient
 distortion count; it then contains camera intrinsics, Brown–Conrady distortion,
 and a 3×3 inverse rectification transform. Applying those records to a live
 640×400 PAIR capture produced the expected small black rectification borders.
+A separately distributed Android Revo Scan 5.3.4 artifact (SHA-256
+`20d55e97c553a25fcafde0a486c2dd08040cc40106a6e5b5ef949acf2ee74c25`)
+provided an independent clean-room cross-check: its exported rectification
+helper reads the same intrinsic and Brown–Conrady fields, removes distortion
+iteratively for the forward coordinate query, and applies the inverse of the
+stored final 3×3 transform. This corroborates the Rust inverse-map direction
+and coefficient order without incorporating vendor code. The image resampler
+now uses bilinear interpolation rather than nearest-neighbor rounding; all 50
+mutants in that change were killed by focused tests.
+
 A whole-image horizontal comparison of the rectified wall target had its lowest
 error at approximately 14–15 half-resolution pixels, providing an independent
 sanity check that the epipolar direction is horizontal. Per-pixel SAD disparity
@@ -100,6 +110,13 @@ is filtered by a best-versus-runner-up cost margin, checked against a reverse
 right-to-left match, and emitted for diagnosis. The nearly planar, low-texture
 target remains a deliberately difficult case and the output is not treated as
 qualified depth.
+
+On a later live wall capture, bilinear rectification retained 38,697 of 256,000
+pixels (15.1%), with a global disparity of 20 pixels, provisional median depth
+of 264 mm, median absolute deviation of 8 mm, and a 233–272 mm p10–p90 range.
+That is only a marginal retention change from nearest-neighbor rectification;
+the disparity image remains fragmented, so the result validates the resampling
+boundary but still does not qualify the stereo geometry.
 
 The accompanying 4×4 Q record follows the standard homogeneous reprojection
 shape. Scaling half-resolution disparity back to calibration resolution and

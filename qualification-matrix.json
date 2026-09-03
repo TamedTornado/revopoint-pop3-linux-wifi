@@ -12,6 +12,7 @@
     "experimental_ros_depth_pass": true,
     "experimental_depth_image_proc_pass": true,
     "experimental_rviz_depth_image_pass": true,
+    "experimental_rviz_cloud_display_pass": true,
     "hardware_depth_z16_pass": false,
     "ros_depth_camera_pass": false,
     "rviz_live_acceptance_pass": false
@@ -95,7 +96,7 @@
       "environment": "Ubuntu 24.04 with ROS 2 Jazzy",
       "command": "ros2 run depth_image_proc point_cloud_xyz_node --ros-args -r image_rect:=/depth/image_rect -r camera_info:=/depth/camera_info",
       "status": "PARTIAL",
-      "claim": "Stock depth_image_proc emitted a 640-wide organized PointCloud2 from corrected reconstructed depth; visual cloud geometry and measured-target accuracy remain unaccepted"
+      "claim": "Stock depth_image_proc emitted a 640-wide organized PointCloud2 from corrected reconstructed depth and RViz2 displayed it; the wall appeared as sparse separated lobes, so visual plane geometry and measured-target accuracy remain unaccepted"
     },
     {
       "id": "rviz-hardware",
@@ -103,7 +104,7 @@
       "environment": "POP 3 Plus, turntable, ROS 2 Jazzy, RViz2",
       "command": "rviz2 -d config/pop3-depth.rviz",
       "status": "PARTIAL",
-      "claim": "RViz2 displayed the corrected live reconstructed depth image; the point cloud has not yet passed visual geometry or measured-target acceptance"
+      "claim": "RViz2 displayed the corrected live reconstructed depth image and point cloud with a static optical-frame transform; the sparse separated cloud failed the planar-wall geometry check and measured-target acceptance remains open"
     }
   ]
 }

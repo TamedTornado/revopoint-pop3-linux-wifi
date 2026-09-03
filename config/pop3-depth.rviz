@@ -54,7 +54,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: pop3_depth_optical_frame
+    Fixed Frame: world
     Frame Rate: 30
   Name: root
   Tools:
@@ -74,7 +74,7 @@ Visualization Manager:
         Z: 0.2
       Name: Current View
       Pitch: 0.5
-      Target Frame: pop3_depth_optical_frame
+      Target Frame: world
       Yaw: 3.14
 Window Geometry:
   Height: 900

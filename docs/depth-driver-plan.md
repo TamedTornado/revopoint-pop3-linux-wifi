@@ -133,9 +133,10 @@ Corrected status: the ROS graph and RViz plumbing worked, but its live input was
 not depth. The V-shaped cloud was a useful falsification signal, not an
 acceptance receipt. The corrected reconstruction now drives stock
 `depth_image_proc`: a subscriber received a 640-wide organized `PointCloud2`,
-and RViz2 displayed the live reconstructed depth image. The cloud has not yet
-passed visual geometry or measured-target acceptance, so this phase remains
-partial rather than complete.
+and RViz2 displayed the live reconstructed depth image and cloud after a static
+optical-frame transform was supplied. The roughly planar wall appeared as sparse
+separated lobes, so the visual geometry check failed usefully. This phase
+remains partial rather than complete.
 
 ### 8. Continue into turntable RGB-D capture ([#8](https://github.com/TamedTornado/revopoint-pop3-linux-wifi/issues/8))
 

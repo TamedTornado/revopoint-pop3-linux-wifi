@@ -168,13 +168,17 @@ terminals, stock ROS tooling can derive the organized cloud and display both:
 source /opt/ros/jazzy/setup.bash
 ros2 run depth_image_proc point_cloud_xyz_node --ros-args \
   -r image_rect:=/depth/image_rect -r camera_info:=/depth/camera_info
+ros2 run tf2_ros static_transform_publisher --frame-id world \
+  --child-frame-id pop3_depth_optical_frame
 rviz2 -d config/pop3-depth.rviz
 ```
 
 A real-hardware run delivered all 20 frames, a ROS subscriber observed image
 width 640, stock `depth_image_proc` emitted a 640-wide `PointCloud2`, and RViz2
-displayed the reconstructed depth image. This verifies plumbing, not geometric
-accuracy. The cloud still requires visual and measured-target acceptance.
+displayed both the reconstructed depth image and cloud. The roughly planar wall
+appeared as sparse separated lobes rather than an accepted plane. This verifies
+the complete plumbing and gives us a useful visual failure, not geometric
+accuracy or acceptance.
 
 ## Important limitations
 
